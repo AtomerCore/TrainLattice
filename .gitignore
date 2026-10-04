@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.zcode/
+.coverage
+.venv/
+venv/
+dist/
+build/
+runs/*
+!runs/.gitkeep
+data/
+*.pt
+*.pth
