@@ -10,7 +10,7 @@ TrainLattice 是一个轻量、透明的 PyTorch 训练运行时，用于从第�
 
 ## 特性
 
-- 严格校验的 YAML 实验 配置：未知小节与字段在创建运行目录之前即被拒绝，错误信息带点分路径
+- 严格校验的 YAML 实验配置：未知小节与字段在创建运行目录之前即被拒绝，错误信息带点分路径
 - 基于注册表的组件构建；`mlp` 架构注册表与 `synthetic` 数据集注册表保留为可见扩展点
 - 可配置的 MLP：`input_dim`、`hidden_dims`、`num_classes`；激活固定为 GELU，dropout 固定为 0.1
 - 确定性的 synthetic 训练/验证划分，以及按 epoch 感知的洗牌采样
