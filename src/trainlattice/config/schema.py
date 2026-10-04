@@ -1,0 +1,211 @@
+"""Typed experiment configuration and validation."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field, fields
+from math import prod
+from pathlib import Path
+from typing import Any, Mapping
+
+from trainlattice.errors import ConfigError
+
+
+def _section(data: Mapping[str, Any], key: str) -> dict[str, Any]:
+    value = data.get(key, {})
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ConfigError(f"{key} must be a mapping")
+    return dict(value)
+
+
+def _fixed_section(section_type: type[Any], data: Mapping[str, Any], path: str) -> Any:
+    """Build a fixed-schema dataclass with dotted-path errors."""
+    allowed = {item.name for item in fields(section_type)}
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        joined = ", ".join(f"{path}.{key}" for key in unknown)
+        raise ConfigError(f"unknown configuration field(s): {joined}")
+    try:
+        return section_type(**dict(data))
+    except TypeError as exc:
+        raise ConfigError(f"invalid {path} configuration: {exc}") from exc
+
+
+def _require_string(value: Any, path: str) -> str:
+    if not isinstance(value, str):
+        raise ConfigError(f"{path} must be a string")
+    return value.strip().lower()
+
+
+@dataclass(slots=True)
+class ExperimentSection:
+    """Experiment identity and artifact location."""
+
+    name: str = "experiment"
+    seed: int = 42
+    runs_dir: str = "runs"
+
+
+@dataclass(slots=True)
+class ModelConfig:
+    """A model name and architecture-specific options."""
+
+    name: str
+    options: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ModelConfig":
+        values = dict(data)
+        name = _require_string(values.pop("name", ""), "model.name")
+        return cls(name=name, options=values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, **self.options}
+
+
+@dataclass(slots=True)
+class DatasetConfig:
+    """Dataset and data-loader settings."""
+
+    name: str
+    batch_size: int = 64
+    num_workers: int = 0
+    options: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "DatasetConfig":
+        values = dict(data)
+        known = {key: values.pop(key) for key in list(values) if key in {"name", "batch_size", "num_workers"}}
+        name = _require_string(known.pop("name", ""), "dataset.name")
+        return cls(name=name, options=values, **known)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "batch_size": self.batch_size,
+            "num_workers": self.num_workers,
+            **self.options,
+        }
+
+
+@dataclass(slots=True)
+class OptimizerConfig:
+    """Learning-rate settings for the fixed AdamW optimizer."""
+
+    lr: float = 0.001
+
+
+@dataclass(slots=True)
+class TrainerConfig:
+    """Training-loop controls."""
+
+    epochs: int = 1
+    device: str = "auto"
+    validate_every: int = 1
+    log_every: int = 10
+
+
+@dataclass(slots=True)
+class ExperimentConfig:
+    """Validated root configuration for one training experiment."""
+
+    experiment: ExperimentSection
+    model: ModelConfig
+    dataset: DatasetConfig
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    trainer: TrainerConfig = field(default_factory=TrainerConfig)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ExperimentConfig":
+        if not isinstance(data, Mapping):
+            raise ConfigError("configuration root must be a mapping")
+        allowed_sections = {"experiment", "model", "dataset", "optimizer", "trainer"}
+        unknown = sorted(set(data) - allowed_sections)
+        if unknown:
+            raise ConfigError(f"unknown configuration section(s): {', '.join(unknown)}")
+        config = cls(
+            experiment=_fixed_section(ExperimentSection, _section(data, "experiment"), "experiment"),
+            model=ModelConfig.from_dict(_section(data, "model")),
+            dataset=DatasetConfig.from_dict(_section(data, "dataset")),
+            optimizer=_fixed_section(OptimizerConfig, _section(data, "optimizer"), "optimizer"),
+            trainer=_fixed_section(TrainerConfig, _section(data, "trainer"), "trainer"),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        errors: list[str] = []
+        if not isinstance(self.experiment.name, str) or not self.experiment.name.strip():
+            errors.append("experiment.name must not be empty")
+        if not isinstance(self.experiment.seed, int) or isinstance(self.experiment.seed, bool):
+            errors.append("experiment.seed must be an integer")
+        if not isinstance(self.experiment.runs_dir, str) or not self.experiment.runs_dir.strip():
+            errors.append("experiment.runs_dir must be a non-empty string")
+        if not isinstance(self.model.name, str) or not self.model.name:
+            errors.append("model.name is required")
+        if not isinstance(self.dataset.name, str) or not self.dataset.name:
+            errors.append("dataset.name is required")
+        if (
+            not isinstance(self.optimizer.lr, (int, float))
+            or isinstance(self.optimizer.lr, bool)
+            or self.optimizer.lr <= 0
+        ):
+            errors.append("optimizer.lr must be a positive number")
+        if not isinstance(self.dataset.batch_size, int) or isinstance(self.dataset.batch_size, bool):
+            errors.append("dataset.batch_size must be an integer")
+        elif self.dataset.batch_size < 1:
+            errors.append("dataset.batch_size must be at least 1")
+        if not isinstance(self.dataset.num_workers, int) or isinstance(self.dataset.num_workers, bool):
+            errors.append("dataset.num_workers must be an integer")
+        elif self.dataset.num_workers < 0:
+            errors.append("dataset.num_workers must be non-negative")
+        if not isinstance(self.trainer.epochs, int) or isinstance(self.trainer.epochs, bool):
+            errors.append("trainer.epochs must be an integer")
+        elif self.trainer.epochs < 1:
+            errors.append("trainer.epochs must be at least 1")
+        if not isinstance(self.trainer.validate_every, int) or isinstance(self.trainer.validate_every, bool):
+            errors.append("trainer.validate_every must be an integer")
+        elif self.trainer.validate_every < 1:
+            errors.append("trainer.validate_every must be at least 1")
+        if not isinstance(self.trainer.log_every, int) or isinstance(self.trainer.log_every, bool):
+            errors.append("trainer.log_every must be an integer")
+        elif self.trainer.log_every < 1:
+            errors.append("trainer.log_every must be at least 1")
+        if not isinstance(self.trainer.device, str) or not self.trainer.device.strip():
+            errors.append("trainer.device must be a non-empty string")
+        if self.model.name == "mlp" and self.dataset.name == "synthetic":
+            errors.extend(self._model_dataset_contracts())
+        if errors:
+            raise ConfigError("; ".join(errors))
+
+    def _model_dataset_contracts(self) -> list[str]:
+        """Check the MLP model shape against the synthetic dataset shape."""
+        errors: list[str] = []
+        shape = self.dataset.options.get("input_shape", [1, 28, 28])
+        well_formed = isinstance(shape, (list, tuple)) and shape and all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 1 for value in shape
+        )
+        if well_formed:
+            flattened = prod(shape)
+            input_dim = self.model.options.get("input_dim", 784)
+            if input_dim != flattened:
+                errors.append(
+                    f"model.input_dim ({input_dim}) must match dataset.input_shape product ({flattened})"
+                )
+        dataset_classes = self.dataset.options.get("num_classes", 10)
+        model_classes = self.model.options.get("num_classes", 10)
+        if model_classes != dataset_classes:
+            errors.append(
+                f"model.num_classes ({model_classes}) must match dataset.num_classes ({dataset_classes})"
+            )
+        return errors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "experiment": asdict(self.experiment),
+            "model": self.model.to_dict(),
+            "dataset": self.dataset.to_dict(),
+            "optimizer": asdict(self.optimizer),
+            "trainer": asdict(self.trainer),
+        }
