@@ -1,5 +1,7 @@
 # TrainLattice
 
+English | [简体中文](README.zh-CN.md)
+
 Minimal infrastructure for deep learning training.
 
 **Build. Run. Recover. Reproduce.**
