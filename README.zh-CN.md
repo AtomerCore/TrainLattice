@@ -22,7 +22,7 @@ TrainLattice 是一个轻量、透明的 PyTorch 训练运行时，用于从第�
 - 自包含的运行产物：`config.yaml`、`environment.json`、`manifest.json`、`metrics.jsonl` 与 `checkpoints/`
 - 支持单进程 CPU 与单 CUDA 设备执行，全进程统一设置随机种子
 
-## 安装与运行
+## 安装
 
 需要 Python 3.10 或更高版本。在 PowerShell 中执行：
 
@@ -33,6 +33,8 @@ python -m pip install -e ".[test]"
 ```
 
 核心依赖只有 PyYAML 与 PyTorch。synthetic 数据集在内存中生成，不下载任何内容。
+
+## 快速开始
 
 运行示例实验：
 
