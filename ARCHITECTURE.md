@@ -36,8 +36,8 @@ The runtime is deliberately layered. The CLI translates user intent into one app
 | Package | Responsibility | May depend on |
 |---|---|---|
 | `cli` | Argument parsing, dispatch, human-readable output | runtime runner |
-| `config` | Typed schema, YAML parsing, resume-compatibility comparison | standard library, PyYAML, `errors` |
-| `registry` | Generic named-constructor registry | `errors` |
+| `config` | Typed schema, YAML parsing, component contracts, resume-compatibility comparison | standard library, PyYAML, `errors` |
+| `registry` | Generic named-constructor registry with optional per-entry declarations | `errors` |
 | `modeling` | MLP architecture, registration, validation, construction | PyTorch, `config`, `registry`, `errors` |
 | `datasets` | Synthetic dataset registration and validation, split construction, epoch sampler, data loaders | PyTorch, `config`, `registry`, `errors` |
 | `logging` | Console and JSONL metric sinks | standard library |
@@ -58,11 +58,11 @@ Dependencies flow from `cli` and `runtime` orchestration toward focused domain m
 - `optimizer`: the learning rate for the fixed AdamW optimizer.
 - `trainer`: epochs, device, validation cadence, and log cadence.
 
-The loader parses YAML, materializes dataclasses, then validates types, ranges, and cross-field constraints. Unknown sections, unknown fixed-schema fields, and unsupported component options are rejected with dotted paths. Model and dataset options are preflighted before any component is constructed or a run directory is created, including the contracts that `model.input_dim` equals the product of `dataset.input_shape` and `model.num_classes` equals `dataset.num_classes`. The resolved configuration is the only configuration passed into component factories; it is written to every run directory and stored inside every checkpoint.
+The loader parses YAML, materializes dataclasses, then validates types, ranges, and within-section constraints. Unknown sections and unknown fixed-schema fields are rejected with dotted paths. Model and dataset options and the contracts between them are preflighted by the runner through the registry declarations before any component is constructed or a run directory is created, including that `model.input_dim` equals the product of `dataset.input_shape` and `model.num_classes` equals `dataset.num_classes`. The resolved configuration is the only configuration passed into component factories; it is written to every run directory and stored inside every checkpoint.
 
 ## Registry and Construction
 
-`Registry` maps a normalized lowercase name to a constructor, rejects duplicate registration, and reports the available choices on lookup failure. Two registries are the visible extension points: `modeling.ARCHITECTURES` (registered: `mlp`) and `datasets.DATASETS` (registered: `synthetic`). Built-ins register when their owning component module is imported.
+`Registry` maps a normalized lowercase name to a `Registration`: a constructor plus optional `validate` and `contract` declarations. `validate` checks the component's supported options with dotted-path errors; `contract` maps the resolved options to a `ComponentContract` (flattened input width and class count) that the runner compares between the registered model and dataset before construction. Entries without declarations pass options through and skip contract comparison. Duplicate registration is rejected and lookup failures report the available choices. Two registries are the visible extension points: `modeling.ARCHITECTURES` (registered: `mlp`) and `datasets.DATASETS` (registered: `synthetic`). Built-ins register when their owning component module is imported.
 
 `runtime/runner.py` composes one experiment in this order:
 
@@ -71,6 +71,7 @@ load and validate configuration
   -> seed every generator
   -> resolve the explicit resume checkpoint, when requested
   -> validate model and dataset options
+  -> compare model and dataset contracts
   -> select device
   -> build the registered architecture
   -> construct AdamW with the configured learning rate

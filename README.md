@@ -56,7 +56,7 @@ Resume that run from its latest completed epoch:
 python -m trainlattice train configs/synthetic_mlp.yaml --resume runs/20261004-120000_synthetic-mlp-smoke
 ```
 
-`--resume` accepts a run directory (its `checkpoints/last.pt` is used) or a checkpoint file path. Each invocation creates a fresh run directory and records the resume source in its manifest.
+`--resume` accepts a run directory (its `checkpoints/last.pt` is used, or a `last.pt` directly inside it) or a checkpoint file path. Each invocation creates a fresh run directory and records the resume source in its manifest.
 
 ## Runs and Recovery
 

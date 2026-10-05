@@ -37,7 +37,7 @@ When a request conflicts with these documents, follow the user's current request
 1. Dependencies flow inward from CLI and runtime orchestration toward focused domain modules. Core modules must not import the CLI.
 2. `Trainer` owns lifecycle control and state transitions. It delegates persistence and logging to callbacks and services.
 3. Checkpoints include the model, optimizer, trainer state, resolved configuration, and random-number-generator state.
-4. Registries map stable lowercase names to constructors. Import-time registration is limited to the component modules that own each registry.
+4. Registries map stable lowercase names to constructors with optional validate and contract declarations. Import-time registration is limited to the component modules that own each registry.
 5. Configuration is validated before model, dataset, optimizer, or trainer construction. Error messages must identify the invalid dotted path.
 6. Model customization is structured through supported architecture parameters and dataset options.
 7. Generated run artifacts are self-contained enough to inspect and resume locally.

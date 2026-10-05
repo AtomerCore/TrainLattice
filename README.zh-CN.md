@@ -56,7 +56,7 @@ python -m trainlattice train configs/synthetic_mlp.yaml --verbose
 python -m trainlattice train configs/synthetic_mlp.yaml --resume runs/20261004-120000_synthetic-mlp-smoke
 ```
 
-`--resume` 接受运行目录（使用其中的 `checkpoints/last.pt`）或 checkpoint 文件路径。每次调用都会创建新的运行目录，并在 manifest 中记录恢复来源。
+`--resume` 接受运行目录（使用其中的 `checkpoints/last.pt`，或目录下直接的 `last.pt`）或 checkpoint 文件路径。每次调用都会创建新的运行目录，并在 manifest 中记录恢复来源。
 
 ## 产物与恢复
 
