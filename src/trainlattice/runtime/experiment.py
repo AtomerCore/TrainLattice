@@ -26,7 +26,16 @@ class RunContext:
     manifest: dict[str, Any]
 
     @classmethod
-    def create(cls, config: ExperimentConfig, *, command: str) -> "RunContext":
+    def create(
+        cls,
+        config: ExperimentConfig,
+        *,
+        command: str,
+        model_source: str | None = None,
+        dataset_source: str | None = None,
+        optimizer_source: str | None = None,
+        loss_source: str | None = None,
+    ) -> "RunContext":
         runs_dir = Path(config.experiment.runs_dir)
         runs_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -56,6 +65,14 @@ class RunContext:
             "epoch": -1,
             "global_step": 0,
         }
+        if model_source is not None:
+            manifest["model_source"] = model_source
+        if dataset_source is not None:
+            manifest["dataset_source"] = dataset_source
+        if optimizer_source is not None:
+            manifest["optimizer_source"] = optimizer_source
+        if loss_source is not None:
+            manifest["loss_source"] = loss_source
         context = cls(path=path, manifest=manifest)
         context.write_manifest()
         return context

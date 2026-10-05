@@ -1,4 +1,4 @@
-"""Transparent single-process classification training lifecycle."""
+"""Transparent single-process training lifecycle with task-aware metrics."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from torch import Tensor, nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
-from trainlattice.trainer.metrics import ClassificationTotals
+from trainlattice.trainer.losses import TASKS
+from trainlattice.trainer.metrics import ClassificationTotals, LossTotals
 from trainlattice.trainer.state import TrainerState, utc_now
 
 if TYPE_CHECKING:
@@ -35,7 +36,10 @@ class Trainer:
         validate_every: int = 1,
         max_grad_norm: float | None = None,
         state: TrainerState | None = None,
+        task: str = "classification",
     ) -> None:
+        if task not in TASKS:
+            raise ValueError(f"task must be one of: {', '.join(TASKS)}")
         self.model = model
         self.optimizer = optimizer
         self.loss_fn = loss_fn
@@ -46,6 +50,8 @@ class Trainer:
         self.max_grad_norm = max_grad_norm
         self.state = state or TrainerState()
         self.batch_metrics: dict[str, float] = {}
+        # the task kind decides whether accuracy joins loss in the aggregates
+        self._totals_cls = ClassificationTotals if task == "classification" else LossTotals
 
     def _emit(self, event: str, *args: Any) -> None:
         for callback in self.callbacks:
@@ -103,7 +109,7 @@ class Trainer:
     def train_epoch(self, loader: DataLoader[Any]) -> dict[str, float]:
         """Train for one epoch and return sample-weighted metrics."""
         self.model.train()
-        totals = ClassificationTotals()
+        totals = self._totals_cls()
         for batch in loader:
             self._emit("on_batch_start")
             inputs, targets = self._unpack_batch(batch)
@@ -124,7 +130,7 @@ class Trainer:
         """Evaluate without gradients, preserving the model's previous mode."""
         was_training = self.model.training
         self.model.eval()
-        totals = ClassificationTotals()
+        totals = self._totals_cls()
         try:
             with torch.no_grad():
                 for batch in loader:

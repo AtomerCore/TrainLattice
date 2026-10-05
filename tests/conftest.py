@@ -29,13 +29,21 @@ def _isolate_component_registries():
     try:
         from trainlattice.datasets import DATASETS
         from trainlattice.modeling import ARCHITECTURES
+        from trainlattice.optim import OPTIMIZERS
+        from trainlattice.trainer.losses import LOSS_TASKS, LOSSES
     except Exception:
         yield
         return
-    saved_datasets = dict(DATASETS._items)
-    saved_architectures = dict(ARCHITECTURES._items)
+    saved = {
+        DATASETS: dict(DATASETS._items),
+        ARCHITECTURES: dict(ARCHITECTURES._items),
+        OPTIMIZERS: dict(OPTIMIZERS._items),
+        LOSSES: dict(LOSSES._items),
+    }
+    saved_tasks = dict(LOSS_TASKS)
     yield
-    DATASETS._items.clear()
-    DATASETS._items.update(saved_datasets)
-    ARCHITECTURES._items.clear()
-    ARCHITECTURES._items.update(saved_architectures)
+    for registry, items in saved.items():
+        registry._items.clear()
+        registry._items.update(items)
+    LOSS_TASKS.clear()
+    LOSS_TASKS.update(saved_tasks)
