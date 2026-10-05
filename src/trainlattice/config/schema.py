@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
-from pathlib import Path
 from re import fullmatch
 from typing import Any, Mapping
 
@@ -91,9 +90,38 @@ class DatasetConfig:
 
 @dataclass(slots=True)
 class OptimizerConfig:
-    """Learning-rate settings for the fixed AdamW optimizer."""
+    """Optimizer name, learning rate, and optimizer-specific options."""
 
+    name: str = "adamw"
     lr: float = 0.001
+    options: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "OptimizerConfig":
+        values = dict(data)
+        name = _require_string(values.pop("name", "adamw"), "optimizer.name")
+        lr = values.pop("lr", 0.001)
+        return cls(name=name, lr=lr, options=values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "lr": self.lr, **self.options}
+
+
+@dataclass(slots=True)
+class LossConfig:
+    """Loss name and loss-specific options."""
+
+    name: str = "cross_entropy"
+    options: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "LossConfig":
+        values = dict(data)
+        name = _require_string(values.pop("name", "cross_entropy"), "loss.name")
+        return cls(name=name, options=values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, **self.options}
 
 
 @dataclass(slots=True)
@@ -117,12 +145,13 @@ class ExperimentConfig:
     dataset: DatasetConfig
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
+    loss: LossConfig = field(default_factory=LossConfig)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ExperimentConfig":
         if not isinstance(data, Mapping):
             raise ConfigError("configuration root must be a mapping")
-        allowed_sections = {"experiment", "model", "dataset", "optimizer", "trainer"}
+        allowed_sections = {"experiment", "model", "dataset", "optimizer", "trainer", "loss"}
         unknown = sorted(set(data) - allowed_sections)
         if unknown:
             raise ConfigError(f"unknown configuration section(s): {', '.join(unknown)}")
@@ -130,8 +159,9 @@ class ExperimentConfig:
             experiment=_fixed_section(ExperimentSection, _section(data, "experiment"), "experiment"),
             model=ModelConfig.from_dict(_section(data, "model")),
             dataset=DatasetConfig.from_dict(_section(data, "dataset")),
-            optimizer=_fixed_section(OptimizerConfig, _section(data, "optimizer"), "optimizer"),
+            optimizer=OptimizerConfig.from_dict(_section(data, "optimizer")),
             trainer=_fixed_section(TrainerConfig, _section(data, "trainer"), "trainer"),
+            loss=LossConfig.from_dict(_section(data, "loss")),
         )
         config.validate()
         return config
@@ -148,6 +178,10 @@ class ExperimentConfig:
             errors.append("model.name is required")
         if not isinstance(self.dataset.name, str) or not self.dataset.name:
             errors.append("dataset.name is required")
+        if not isinstance(self.optimizer.name, str) or not self.optimizer.name:
+            errors.append("optimizer.name must be a non-empty string")
+        if not isinstance(self.loss.name, str) or not self.loss.name:
+            errors.append("loss.name must be a non-empty string")
         if (
             not isinstance(self.optimizer.lr, (int, float))
             or isinstance(self.optimizer.lr, bool)
@@ -196,6 +230,7 @@ class ExperimentConfig:
             "experiment": asdict(self.experiment),
             "model": self.model.to_dict(),
             "dataset": self.dataset.to_dict(),
-            "optimizer": asdict(self.optimizer),
+            "optimizer": self.optimizer.to_dict(),
             "trainer": asdict(self.trainer),
+            "loss": self.loss.to_dict(),
         }

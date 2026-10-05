@@ -55,8 +55,32 @@ def test_rejects_unknown_sections_and_fixed_fields(tmp_path: Path) -> None:
         load_config(write_config(tmp_path, BASE_CONFIG + "\ntrainr:\n  epochs: 9\n"))
     with pytest.raises(ConfigError, match="trainer.epochz"):
         load_config(write_config(tmp_path, BASE_CONFIG + "\ntrainer:\n  epochz: 9\n"))
-    with pytest.raises(ConfigError, match="optimizer.name"):
-        load_config(write_config(tmp_path, BASE_CONFIG.replace("lr: 0.01", "name: adamw\n  lr: 0.01")))
+    with pytest.raises(ConfigError, match="optimizer.name must be a string"):
+        load_config(write_config(tmp_path, BASE_CONFIG.replace("lr: 0.01", "name: [adam]\n  lr: 0.01")))
+
+
+def test_loads_optimizer_and_loss_sections(tmp_path: Path) -> None:
+    config = load_config(
+        write_config(
+            tmp_path,
+            BASE_CONFIG.replace("lr: 0.01", "name: sgd\n  lr: 0.01\n  momentum: 0.9")
+            + "loss:\n  name: mse\n",
+        )
+    )
+
+    assert config.optimizer.name == "sgd"
+    assert config.optimizer.options == {"momentum": 0.9}
+    assert config.loss.name == "mse"
+    assert config.loss.options == {}
+
+    defaulted = load_config(write_config(tmp_path))
+    assert defaulted.optimizer.name == "adamw"
+    assert defaulted.loss.name == "cross_entropy"
+
+    resolved = config.to_dict()
+    assert resolved["optimizer"] == {"name": "sgd", "lr": 0.01, "momentum": 0.9}
+    assert resolved["loss"] == {"name": "mse"}
+    assert defaulted.to_dict()["loss"] == {"name": "cross_entropy"}
 
 
 def test_rejects_invalid_scalar_types(tmp_path: Path) -> None:
@@ -184,9 +208,17 @@ def test_recovery_comparison_treats_absent_newer_fields_as_defaults() -> None:
     }
     expected = dict(legacy_checkpoint)
     expected["trainer"] = {**legacy_checkpoint["trainer"], "monitor": "val_loss", "max_grad_norm": None}
+    expected["optimizer"] = {"name": "adamw", "lr": 0.01}
+    expected["loss"] = {"name": "cross_entropy"}
 
     assert configs_compatible(legacy_checkpoint, expected)
 
     changed = dict(expected)
     changed["trainer"] = {**expected["trainer"], "monitor": "val_accuracy"}
     assert not configs_compatible(legacy_checkpoint, changed)
+    changed_loss = dict(expected)
+    changed_loss["loss"] = {"name": "mse"}
+    assert not configs_compatible(legacy_checkpoint, changed_loss)
+    nulled = dict(expected)
+    nulled["loss"] = None
+    assert configs_compatible(legacy_checkpoint, nulled)
