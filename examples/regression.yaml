@@ -1,0 +1,31 @@
+experiment:
+  name: sine-wave-regression
+  seed: 11
+  runs_dir: runs
+
+model:
+  name: mlp
+  input_dim: 1
+  hidden_dims: [32, 16]
+  num_classes: 1
+
+dataset:
+  name: sine_wave
+  batch_size: 16
+  num_workers: 0
+  samples: 128
+  val_samples: 32
+
+optimizer:
+  name: sgd
+  lr: 0.05
+  momentum: 0.9
+
+loss:
+  name: mse
+
+trainer:
+  epochs: 20
+  device: cpu
+  validate_every: 1
+  log_every: 8
