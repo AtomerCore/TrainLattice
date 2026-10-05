@@ -33,6 +33,7 @@ class Trainer:
         epochs: int,
         callbacks: Iterable[Callback] = (),
         validate_every: int = 1,
+        max_grad_norm: float | None = None,
         state: TrainerState | None = None,
     ) -> None:
         self.model = model
@@ -42,6 +43,7 @@ class Trainer:
         self.epochs = epochs
         self.callbacks = list(callbacks)
         self.validate_every = validate_every
+        self.max_grad_norm = max_grad_norm
         self.state = state or TrainerState()
         self.batch_metrics: dict[str, float] = {}
 
@@ -110,6 +112,8 @@ class Trainer:
             logits = self.model(inputs)
             loss = self.loss_fn(logits, targets)
             loss.backward()
+            if self.max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             self.optimizer.step()
             self.batch_metrics = totals.update(logits.detach(), targets, loss.detach())
             self.state.global_step += 1

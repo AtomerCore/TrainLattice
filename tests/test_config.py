@@ -69,6 +69,27 @@ def test_rejects_device_outside_supported_domain(tmp_path: Path) -> None:
         load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  device: tpu")))
 
 
+def test_rejects_invalid_monitor_and_grad_norm(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="trainer.monitor must be one of"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  monitor: train_loss"))
+        )
+    with pytest.raises(ConfigError, match="trainer.monitor must be one of"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  monitor: [val_loss]"))
+        )
+    with pytest.raises(ConfigError, match="trainer.max_grad_norm must be a positive number"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  max_grad_norm: 0"))
+        )
+    with pytest.raises(ConfigError, match="trainer.max_grad_norm must be a positive number"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  max_grad_norm: .nan"))
+        )
+    with pytest.raises(ConfigError, match="optimizer.lr must be a positive number"):
+        load_config(write_config(tmp_path, BASE_CONFIG.replace("lr: 0.01", "lr: .nan")))
+
+
 def test_reports_directory_paths_explicitly(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="configuration path is a directory, not a file"):
         load_config(tmp_path)
@@ -169,13 +190,3 @@ def test_recovery_comparison_treats_absent_newer_fields_as_defaults() -> None:
     changed = dict(expected)
     changed["trainer"] = {**expected["trainer"], "monitor": "val_accuracy"}
     assert not configs_compatible(legacy_checkpoint, changed)
-
-def test_rejects_invalid_monitor(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="trainer.monitor must be one of"):
-        load_config(
-            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  monitor: train_loss"))
-        )
-    with pytest.raises(ConfigError, match="trainer.monitor must be one of"):
-        load_config(
-            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  monitor: [val_loss]"))
-        )

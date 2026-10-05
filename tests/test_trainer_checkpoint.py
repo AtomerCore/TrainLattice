@@ -261,6 +261,43 @@ def test_checkpoint_rejects_unsupported_format_version(tmp_path: Path) -> None:
         manager.load(legacy, model=model, optimizer=optimizer)
 
 
+class GradNormRecorder(Callback):
+    def __init__(self) -> None:
+        self.norms: list[float] = []
+
+    def on_batch_end(self, trainer: Trainer) -> None:
+        total = 0.0
+        for parameter in trainer.model.parameters():
+            if parameter.grad is not None:
+                total += float(parameter.grad.norm() ** 2)
+        self.norms.append(total**0.5)
+
+
+def test_max_grad_norm_bounds_gradient_total_norm() -> None:
+    torch.manual_seed(5)
+    model = nn.Linear(12, 3)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    generator = torch.Generator().manual_seed(6)
+    inputs = torch.randn(12, 12, generator=generator) * 100
+    targets = torch.randint(0, 3, (12,), generator=generator)
+    loader_ = DataLoader(TensorDataset(inputs, targets), batch_size=4, shuffle=False)
+    recorder = GradNormRecorder()
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        loss_fn=nn.CrossEntropyLoss(),
+        device=torch.device("cpu"),
+        epochs=1,
+        callbacks=[recorder],
+        max_grad_norm=0.5,
+    )
+
+    trainer.fit(loader_)
+
+    assert recorder.norms
+    assert all(norm <= 0.5 * (1 + 1e-4) for norm in recorder.norms)
+
+
 def test_best_checkpoint_tracks_monitored_metric_direction(tmp_path: Path) -> None:
     manager = CheckpointManager(tmp_path / "checkpoints")
     loss_callback = CheckpointCallback(manager, {}, monitor="val_loss")

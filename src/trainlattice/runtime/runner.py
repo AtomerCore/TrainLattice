@@ -118,6 +118,7 @@ def run_experiment(
         epochs=config.trainer.epochs,
         callbacks=callbacks,
         validate_every=config.trainer.validate_every,
+        max_grad_norm=config.trainer.max_grad_norm,
         state=state,
     )
     state.started_at = state.started_at or utc_now()

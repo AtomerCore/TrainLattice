@@ -105,6 +105,7 @@ class TrainerConfig:
     validate_every: int = 1
     log_every: int = 10
     monitor: str = "val_loss"
+    max_grad_norm: float | None = None
 
 
 @dataclass(slots=True)
@@ -150,7 +151,7 @@ class ExperimentConfig:
         if (
             not isinstance(self.optimizer.lr, (int, float))
             or isinstance(self.optimizer.lr, bool)
-            or self.optimizer.lr <= 0
+            or not self.optimizer.lr > 0
         ):
             errors.append("optimizer.lr must be a positive number")
         if not isinstance(self.dataset.batch_size, int) or isinstance(self.dataset.batch_size, bool):
@@ -181,6 +182,12 @@ class ExperimentConfig:
             or self.trainer.monitor not in {"val_loss", "val_accuracy"}
         ):
             errors.append("trainer.monitor must be one of: val_loss, val_accuracy")
+        max_grad_norm = self.trainer.max_grad_norm
+        if isinstance(max_grad_norm, bool) or (
+            max_grad_norm is not None
+            and (not isinstance(max_grad_norm, (int, float)) or not max_grad_norm > 0)
+        ):
+            errors.append("trainer.max_grad_norm must be a positive number")
         if errors:
             raise ConfigError("; ".join(errors))
 
