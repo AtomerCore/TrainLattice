@@ -6,6 +6,8 @@ import pytest
 
 pytest.importorskip("torch")
 
+import torch
+
 from trainlattice.config.schema import (
     DatasetConfig,
     ExperimentConfig,
@@ -77,6 +79,16 @@ def test_cross_component_validation_rejects_class_count_mismatch(tmp_path: Path)
     config.model.options["num_classes"] = 3
 
     with pytest.raises(ConfigError, match="model.num_classes"):
+        run_experiment(config, command="pytest incompatible")
+
+    assert not Path(config.experiment.runs_dir).exists()
+
+
+def test_cross_component_validation_rejects_cnn_shape_mismatch(tmp_path: Path) -> None:
+    config = tiny_config(tmp_path)
+    config.model = ModelConfig("cnn", {"input_shape": [3, 4, 4], "channels": [4], "num_classes": 2})
+
+    with pytest.raises(ConfigError, match=r"model.input_shape \(\[3, 4, 4\]\) must match dataset.input_shape \(\[4\]\)"):
         run_experiment(config, command="pytest incompatible")
 
     assert not Path(config.experiment.runs_dir).exists()

@@ -5,7 +5,7 @@ torch = pytest.importorskip("torch")
 from trainlattice.config.schema import ModelConfig
 from trainlattice.errors import ConfigError
 from trainlattice.modeling import ARCHITECTURES, build_model, validate_model_config
-from trainlattice.modeling.architectures import MLP
+from trainlattice.modeling.architectures import CNN, MLP
 
 
 def test_builds_configurable_mlp() -> None:
@@ -19,8 +19,8 @@ def test_builds_configurable_mlp() -> None:
     assert all(module.p == 0.1 for module in dropouts)
 
 
-def test_architecture_registry_exposes_only_mlp() -> None:
-    assert ARCHITECTURES.names() == ("mlp",)
+def test_architecture_registry_exposes_cnn_and_mlp() -> None:
+    assert ARCHITECTURES.names() == ("cnn", "mlp")
 
 
 def test_rejects_unsupported_architecture() -> None:
@@ -42,3 +42,39 @@ def test_rejects_invalid_mlp_dimensions() -> None:
         build_model(ModelConfig("mlp", {"input_dim": 4, "hidden_dims": [8, -1]}))
     with pytest.raises(ConfigError, match="model.num_classes must be a positive integer"):
         build_model(ModelConfig("mlp", {"input_dim": 4, "num_classes": True}))
+
+
+def test_builds_configurable_cnn() -> None:
+    config = ModelConfig("cnn", {"input_shape": [1, 8, 8], "channels": [4, 8], "num_classes": 3})
+    model = build_model(config)
+
+    assert isinstance(model, CNN)
+    assert model(torch.randn(2, 1, 8, 8)).shape == (2, 3)
+    convs = [module for module in model.network if isinstance(module, torch.nn.Conv2d)]
+    assert [(conv.in_channels, conv.out_channels) for conv in convs] == [(1, 4), (4, 8)]
+
+
+def test_rejects_invalid_cnn_options() -> None:
+    with pytest.raises(ConfigError, match="model.input_shape must contain three positive integers"):
+        build_model(ModelConfig("cnn", {"input_shape": [1, 28]}))
+    with pytest.raises(ConfigError, match=r"model.channels\[0\] must be a positive integer"):
+        build_model(ModelConfig("cnn", {"channels": [0, 8]}))
+    with pytest.raises(ConfigError, match="model.num_classes must be a positive integer"):
+        build_model(ModelConfig("cnn", {"num_classes": 0}))
+    with pytest.raises(ConfigError, match="model.kernel"):
+        validate_model_config(ModelConfig("cnn", {"kernel_size": 5}))
+
+
+def test_rejects_cnn_shape_below_pooling_factor() -> None:
+    with pytest.raises(ConfigError, match="divisible by the pooling factor 4"):
+        build_model(ModelConfig("cnn", {"input_shape": [1, 8, 15], "channels": [4, 8]}))
+
+
+def test_cnn_contract_states_structured_shape() -> None:
+    contract = ARCHITECTURES.entry("cnn").contract
+
+    assert contract is not None
+    declared = contract({"input_shape": [3, 32, 32], "num_classes": 5})
+    assert declared.input_shape == (3, 32, 32)
+    assert declared.input_dim is None
+    assert declared.num_classes == 5

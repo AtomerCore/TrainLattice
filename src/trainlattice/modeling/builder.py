@@ -10,7 +10,7 @@ from torch import nn
 from trainlattice.config.contracts import ComponentContract
 from trainlattice.config.schema import ModelConfig
 from trainlattice.errors import ConfigError
-from trainlattice.modeling.architectures import MLP
+from trainlattice.modeling.architectures import CNN, MLP
 from trainlattice.registry import Registry
 
 ARCHITECTURES: Registry[nn.Module] = Registry("architecture")
@@ -47,7 +47,40 @@ def _mlp_contract(options: Mapping[str, Any]) -> ComponentContract:
     )
 
 
+def _validate_cnn(path: str, options: Mapping[str, Any]) -> None:
+    """Validate the supported CNN architecture options."""
+    unknown = sorted(set(options) - {"input_shape", "channels", "num_classes"})
+    if unknown:
+        paths = ", ".join(f"{path}.{key}" for key in unknown)
+        raise ConfigError(f"unknown configuration field(s): {paths}")
+    shape = options.get("input_shape", (1, 28, 28))
+    if (
+        not isinstance(shape, (list, tuple))
+        or len(shape) != 3
+        or any(not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in shape)
+    ):
+        raise ConfigError(f"{path}.input_shape must contain three positive integers")
+    channels = _positive_sequence(options.get("channels", (32, 64)), f"{path}.channels")
+    _positive_integer(options.get("num_classes", 10), f"{path}.num_classes")
+    height, width = shape[1], shape[2]
+    factor = 2 ** len(channels)
+    if height % factor != 0 or width % factor != 0:
+        raise ConfigError(
+            f"{path}.input_shape spatial dimensions ({height}, {width}) must stay divisible by the pooling factor {factor}"
+        )
+
+
+def _cnn_contract(options: Mapping[str, Any]) -> ComponentContract:
+    """State the CNN structured input shape and class count."""
+    return ComponentContract(
+        input_dim=None,
+        num_classes=options.get("num_classes", 10),
+        input_shape=tuple(options.get("input_shape", (1, 28, 28))),
+    )
+
+
 ARCHITECTURES.register("mlp", MLP, validate=_validate_mlp, contract=_mlp_contract)
+ARCHITECTURES.register("cnn", CNN, validate=_validate_cnn, contract=_cnn_contract)
 
 
 def validate_model_config(config: ModelConfig) -> None:
