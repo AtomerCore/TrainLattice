@@ -72,6 +72,8 @@ def dispatch(args: argparse.Namespace) -> int:
     command = " ".join(shlex.quote(item) for item in ["trainlattice", "train", str(args.config)])
     if args.resume:
         command = " ".join([command, shlex.quote(args.resume)])
+    if getattr(args, "verbose", False):
+        command = " ".join([command, "--verbose"])
     result = run_from_file(args.config, resume=args.resume, command=command)
     print(f"Run {result.state.status}: {result.run_dir}")
     return 0
