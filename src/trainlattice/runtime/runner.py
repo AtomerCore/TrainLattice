@@ -11,12 +11,11 @@ from torch import nn
 
 from trainlattice.callbacks import CheckpointCallback, LoggingCallback
 from trainlattice.checkpoint import CheckpointManager
-from trainlattice.config import ExperimentConfig, load_config
-from trainlattice.datasets import build_dataloaders, validate_dataset_config
-from trainlattice.errors import TrainLatticeError
+from trainlattice.config import ExperimentConfig, compare_contracts, load_config
+from trainlattice.datasets import DATASETS, build_dataloaders, validate_dataset_config
+from trainlattice.errors import ConfigError, TrainLatticeError
 from trainlattice.logging import CompositeLogger, ConsoleLogger, JSONLLogger
-from trainlattice.modeling import build_model
-from trainlattice.modeling.builder import validate_model_config
+from trainlattice.modeling import ARCHITECTURES, build_model, validate_model_config
 from trainlattice.runtime.device import select_device
 from trainlattice.runtime.experiment import RunContext
 from trainlattice.runtime.seed import seed_everything
@@ -48,6 +47,20 @@ def _checkpoint_source(resume: str | Path) -> Path:
     raise TrainLatticeError(f"resume checkpoint not found: {resume}")
 
 
+def _check_contracts(config: ExperimentConfig) -> None:
+    """Compare the registered model and dataset contracts before anything is built."""
+    model_contract = ARCHITECTURES.entry(config.model.name).contract
+    dataset_contract = DATASETS.entry(config.dataset.name).contract
+    if model_contract is None or dataset_contract is None:
+        return
+    errors = compare_contracts(
+        model_contract(config.model.options),
+        dataset_contract(config.dataset.options),
+    )
+    if errors:
+        raise ConfigError("; ".join(errors))
+
+
 def run_experiment(
     config: ExperimentConfig,
     *,
@@ -62,6 +75,7 @@ def run_experiment(
         explicit_source = _checkpoint_source(resume)
     validate_model_config(config.model)
     validate_dataset_config(config.dataset)
+    _check_contracts(config)
     device = select_device(config.trainer.device)
     model = build_model(config.model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.optimizer.lr)

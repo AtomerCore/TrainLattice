@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from trainlattice.config import configs_compatible, load_config
+from trainlattice.config import ComponentContract, compare_contracts, configs_compatible, load_config
 from trainlattice.errors import ConfigError
 
 
@@ -64,19 +64,26 @@ def test_rejects_invalid_scalar_types(tmp_path: Path) -> None:
         load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", 'epochs: "two"')))
 
 
-def test_rejects_model_dataset_shape_mismatch(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="model.input_dim"):
-        load_config(write_config(tmp_path, BASE_CONFIG.replace("input_shape: [4]", "input_shape: [5]")))
+def test_contract_comparison_reports_both_mismatch_kinds() -> None:
+    model = ComponentContract(input_dim=4, num_classes=2)
+    dataset = ComponentContract(input_dim=5, num_classes=10)
+
+    errors = compare_contracts(model, dataset)
+
+    assert errors == [
+        "model.input_dim (4) must match dataset.input_shape product (5)",
+        "model.num_classes (2) must match dataset.num_classes (10)",
+    ]
 
 
-def test_rejects_model_dataset_class_mismatch(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="model.num_classes"):
-        load_config(
-            write_config(
-                tmp_path,
-                BASE_CONFIG.replace("input_dim: 4", "input_dim: 4\n  num_classes: 2"),
-            )
-        )
+def test_contract_comparison_accepts_matching_contracts() -> None:
+    assert compare_contracts(ComponentContract(784, 10), ComponentContract(784, 10)) == []
+
+
+def test_contract_comparison_skips_unstated_input_dim() -> None:
+    stated = ComponentContract(input_dim=None, num_classes=3)
+
+    assert compare_contracts(ComponentContract(4, 3), stated) == []
 
 
 def test_recovery_comparison_allows_runtime_only_changes(tmp_path: Path) -> None:

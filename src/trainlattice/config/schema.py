@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
-from math import prod
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -174,32 +173,8 @@ class ExperimentConfig:
             errors.append("trainer.log_every must be at least 1")
         if not isinstance(self.trainer.device, str) or not self.trainer.device.strip():
             errors.append("trainer.device must be a non-empty string")
-        if self.model.name == "mlp" and self.dataset.name == "synthetic":
-            errors.extend(self._model_dataset_contracts())
         if errors:
             raise ConfigError("; ".join(errors))
-
-    def _model_dataset_contracts(self) -> list[str]:
-        """Check the MLP model shape against the synthetic dataset shape."""
-        errors: list[str] = []
-        shape = self.dataset.options.get("input_shape", [1, 28, 28])
-        well_formed = isinstance(shape, (list, tuple)) and shape and all(
-            isinstance(value, int) and not isinstance(value, bool) and value >= 1 for value in shape
-        )
-        if well_formed:
-            flattened = prod(shape)
-            input_dim = self.model.options.get("input_dim", 784)
-            if input_dim != flattened:
-                errors.append(
-                    f"model.input_dim ({input_dim}) must match dataset.input_shape product ({flattened})"
-                )
-        dataset_classes = self.dataset.options.get("num_classes", 10)
-        model_classes = self.model.options.get("num_classes", 10)
-        if model_classes != dataset_classes:
-            errors.append(
-                f"model.num_classes ({model_classes}) must match dataset.num_classes ({dataset_classes})"
-            )
-        return errors
 
     def to_dict(self) -> dict[str, Any]:
         return {

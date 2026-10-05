@@ -69,3 +69,13 @@ def test_cross_component_validation_rejects_input_mismatch(tmp_path: Path) -> No
         run_experiment(config, command="pytest incompatible")
 
     assert not Path(config.experiment.runs_dir).exists()
+
+
+def test_cross_component_validation_rejects_class_count_mismatch(tmp_path: Path) -> None:
+    config = tiny_config(tmp_path)
+    config.model.options["num_classes"] = 3
+
+    with pytest.raises(ConfigError, match="model.num_classes"):
+        run_experiment(config, command="pytest incompatible")
+
+    assert not Path(config.experiment.runs_dir).exists()
