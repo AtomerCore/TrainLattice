@@ -1,6 +1,9 @@
 """Verify metric weighting and evaluation mode boundaries."""
 
 import pytest
+
+pytest.importorskip("torch")
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset

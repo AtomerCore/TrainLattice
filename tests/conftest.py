@@ -21,3 +21,21 @@ def _reset_cli_logging() -> None:
             root.removeHandler(handler)
             handler.close()
     logging.getLogger("trainlattice").setLevel(logging.NOTSET)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_component_registries():
+    """Restore the shared component registries after tests that extend them."""
+    try:
+        from trainlattice.datasets import DATASETS
+        from trainlattice.modeling import ARCHITECTURES
+    except Exception:
+        yield
+        return
+    saved_datasets = dict(DATASETS._items)
+    saved_architectures = dict(ARCHITECTURES._items)
+    yield
+    DATASETS._items.clear()
+    DATASETS._items.update(saved_datasets)
+    ARCHITECTURES._items.clear()
+    ARCHITECTURES._items.update(saved_architectures)
