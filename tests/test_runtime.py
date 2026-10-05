@@ -99,3 +99,29 @@ def test_device_selection_reports_unsupported_requests() -> None:
         select_device("tpu")
     with pytest.raises(TrainLatticeError, match="unsupported device 'foo'"):
         select_device("foo")
+
+
+def test_run_trains_on_file_backed_tensor_dataset(tmp_path: Path) -> None:
+    generator = torch.Generator().manual_seed(9)
+    data_dir = tmp_path / "tensor-data"
+    data_dir.mkdir()
+    for name, count in (("train.pt", 12), ("validation.pt", 6)):
+        torch.save(
+            {
+                "features": torch.randn(count, 1, 4, 4, generator=generator),
+                "labels": torch.randint(0, 2, (count,), generator=generator),
+            },
+            data_dir / name,
+        )
+    config = ExperimentConfig(
+        experiment=ExperimentSection(name="tensor-test", seed=3, runs_dir=str(tmp_path / "runs")),
+        model=ModelConfig("mlp", {"input_dim": 16, "hidden_dims": [8], "num_classes": 2}),
+        dataset=DatasetConfig(name="tensor", batch_size=4, options={"root": str(data_dir), "num_classes": 2}),
+        optimizer=OptimizerConfig(lr=0.05),
+        trainer=TrainerConfig(epochs=1, device="cpu", validate_every=1, log_every=100),
+    )
+
+    result = run_experiment(config, command="pytest tensor")
+
+    assert result.state.status == "finished"
+    assert (result.run_dir / "checkpoints" / "last.pt").is_file()
