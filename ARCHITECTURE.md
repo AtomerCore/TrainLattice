@@ -2,7 +2,7 @@
 
 ## Purpose and Scope
 
-TrainLattice is a transparent, configuration-driven PyTorch runtime for local classification experiments. It turns one strictly validated YAML file into a reproducible training run: a registered MLP architecture on the registered synthetic dataset, the fixed AdamW optimizer, lifecycle callbacks, structured metrics, complete atomic checkpoints, explicit resume, and inspectable artifacts.
+TrainLattice is a transparent, configuration-driven PyTorch runtime for local classification experiments. It turns one strictly validated YAML file into a reproducible training run: a registered architecture (`mlp` or `cnn`) on a registered dataset (`synthetic` or `tensor`), the fixed AdamW optimizer, lifecycle callbacks, structured metrics, complete atomic checkpoints, explicit resume, and inspectable artifacts.
 
 The runtime targets one Python process and one selected device (`cpu`, `cuda`, `cuda:N`, or `auto`). Its only interface is the `trainlattice` CLI with the `train` command.
 
@@ -20,7 +20,7 @@ CLI -> Config loader -> Validated ExperimentConfig
           |                |                |
           v                v                v
       Registries       Run context      Environment
-     (mlp, synthetic)     and manifest     capture
+ (mlp, cnn, synthetic, tensor) and manifest  capture
           |
           v
      Model / Dataset -> Trainer <-> TrainerState
@@ -53,16 +53,16 @@ Dependencies flow from `cli` and `runtime` orchestration toward focused domain m
 `ExperimentConfig` is the validated root schema. It contains exactly five sections:
 
 - `experiment`: name, seed, and run root.
-- `model`: architecture name (`mlp`) plus the options `input_dim`, `hidden_dims`, and `num_classes`.
-- `dataset`: registered name (`synthetic`), batch size, worker count, and split-shape options.
+- `model`: architecture name (`mlp` or `cnn`) plus the architecture's options.
+- `dataset`: registered name (`synthetic` or `tensor`), batch size, worker count, and the dataset's options.
 - `optimizer`: the learning rate for the fixed AdamW optimizer.
-- `trainer`: epochs, device, validation cadence, and log cadence.
+- `trainer`: epochs, device, validation cadence, log cadence, the monitored validation metric, and the optional gradient-norm bound.
 
-The loader parses YAML, materializes dataclasses, then validates types, ranges, and within-section constraints. Unknown sections and unknown fixed-schema fields are rejected with dotted paths. Model and dataset options and the contracts between them are preflighted by the runner through the registry declarations before any component is constructed or a run directory is created, including that `model.input_dim` equals the product of `dataset.input_shape` and `model.num_classes` equals `dataset.num_classes`. The resolved configuration is the only configuration passed into component factories; it is written to every run directory and stored inside every checkpoint.
+The loader parses YAML, materializes dataclasses, then validates types, ranges, and within-section constraints. Unknown sections and unknown fixed-schema fields are rejected with dotted paths. Model and dataset options and the contracts between them are preflighted by the runner through the registry declarations before any component is constructed or a run directory is created: the input dimensions must agree when both sides state comparable dimensions — an exact `input_shape` match, or the flattened product when the model states only a width — and `model.num_classes` must equal `dataset.num_classes`. The resolved configuration is the only configuration passed into component factories; it is written to every run directory and stored inside every checkpoint.
 
 ## Registry and Construction
 
-`Registry` maps a normalized lowercase name to a `Registration`: a constructor plus optional `validate` and `contract` declarations. `validate` checks the component's supported options with dotted-path errors; `contract` maps the resolved options to a `ComponentContract` (flattened input width and class count) that the runner compares between the registered model and dataset before construction. Entries without declarations pass options through and skip contract comparison. Duplicate registration is rejected and lookup failures report the available choices. Two registries are the visible extension points: `modeling.ARCHITECTURES` (registered: `mlp`) and `datasets.DATASETS` (registered: `synthetic`). Built-ins register when their owning component module is imported.
+`Registry` maps a normalized lowercase name to a `Registration`: a constructor plus optional `validate` and `contract` declarations. `validate` checks the component's supported options with dotted-path errors; `contract` maps the resolved options to a `ComponentContract` (structured input shape, flattened input width, and class count) that the runner compares between the registered model and dataset before construction. Entries without declarations pass options through and skip contract comparison. Duplicate registration is rejected and lookup failures report the available choices. Two registries are the visible extension points: `modeling.ARCHITECTURES` (registered: `mlp`, `cnn`) and `datasets.DATASETS` (registered: `synthetic`, `tensor`). Built-ins register when their owning component module is imported.
 
 `runtime/runner.py` composes one experiment in this order:
 
@@ -84,13 +84,15 @@ load and validate configuration
 
 ## Model Infrastructure
 
-The architecture registry dispatches on `model.name`. The single built-in `mlp` flattens its input, applies `Linear -> GELU -> Dropout(0.1)` for every width in `hidden_dims`, and ends with a `Linear` to `num_classes`. Activation and dropout are fixed properties of the architecture; `input_dim`, `hidden_dims`, and `num_classes` are the supported options. Validation runs before module construction and rejects unknown options and non-positive dimensions.
+The architecture registry dispatches on `model.name`. The built-in `mlp` flattens its input, applies `Linear -> GELU -> Dropout(0.1)` for every width in `hidden_dims`, and ends with a `Linear` to `num_classes`; activation and dropout are fixed properties of the architecture, and `input_dim`, `hidden_dims`, and `num_classes` are the supported options. The built-in `cnn` applies a `Conv2d(kernel 3, padding 1) -> GELU -> MaxPool(2)` block for every width in `channels`, then flattens into a `Linear` head; its supported options are `input_shape`, `channels`, and `num_classes`, and validation requires the spatial dimensions to stay divisible by the total pooling factor. Validation runs before module construction for every architecture and rejects unknown options and non-positive dimensions.
 
 ## Data Infrastructure
 
 The synthetic dataset is generated in memory from the experiment seed, with independent deterministic generators for the train and validation splits (`samples`, `val_samples`, `input_shape`, `num_classes`). Nothing is downloaded and no optional vision dependency exists.
 
-Dataset registration and option validation live in `datasets/builtin.py`. Split construction, the epoch sampler, and loader assembly live in `datasets/loaders.py`.
+The tensor dataset reads one tensor-pair file per split from a local `root` directory (`train_file`, `val_file`, `num_classes`); each file holds a `{"features": Tensor, "labels": Tensor}` mapping loaded with `weights_only=True`, and split files are validated for existence, consistent lengths, and labels below `num_classes` before any run directory is created.
+
+Dataset registration and option validation live in `datasets/builtin.py` (synthetic) and `datasets/tensor.py` (tensor). Split construction, the epoch sampler, and loader assembly live in `datasets/loaders.py`.
 
 Training loaders use an epoch-aware sampler whose order is derived from the experiment seed and the epoch index. A resumed epoch therefore receives the same sample order as the corresponding uninterrupted epoch without depending on a hidden DataLoader generator cursor.
 
@@ -117,6 +119,8 @@ on_train_end
 
 Training and validation metrics are sample-weighted loss and accuracy aggregated in `trainer/metrics.py`. Validation runs under evaluation mode and without gradient recording, then restores the previous model mode even on failure.
 
+When `trainer.max_grad_norm` is set, gradients are clipped by total norm between `backward()` and the optimizer step. When the monitored validation metric improves on the best value seen so far, the checkpoint callback rewrites `checkpoints/best.pt` in the same epoch-end step as `last.pt`; the best value lives in `TrainerState` and therefore survives resume.
+
 An exception sets the state to `failed`, emits `on_exception` so callbacks can close log streams and write a diagnostic emergency snapshot, updates the manifest, and is re-raised. Exceptions raised inside exception-handling callbacks are reported as WARNING-level diagnostic records without replacing the original training failure.
 
 ## Logging
@@ -139,9 +143,9 @@ The checkpoint manager writes to a temporary sibling file and then atomically re
 - resolved configuration;
 - Python, NumPy when available, CPU Torch, and CUDA RNG state when available.
 
-`last.pt` is rewritten after every completed epoch and is the resume source. `emergency.pt` records the point of an uncaught mid-epoch exception for diagnosis, is marked not resume-safe, and is rejected at load time. Only format version 3 is accepted; any other version is rejected explicitly.
+`last.pt` is rewritten after every completed epoch and is the resume source. `best.pt` is rewritten whenever the monitored validation metric improves and holds the same complete payload. `emergency.pt` records the point of an uncaught mid-epoch exception for diagnosis, is marked not resume-safe, and is rejected at load time. Only format version 3 is accepted; any other version is rejected explicitly.
 
-Resume is always explicit (`--resume` with a run directory or checkpoint file). Loading restores model, optimizer, and trainer state plus available RNG state, then training begins at `TrainerState.next_epoch`. A compatibility check compares recovery-sensitive configuration values field by field; runtime-only settings (`trainer.device`, `trainer.log_every`, `trainer.epochs`, and `experiment.runs_dir`) may change. A resumed run is a new run directory whose manifest records `resume_source`.
+Resume is always explicit (`--resume` with a run directory or checkpoint file). Loading restores model, optimizer, and trainer state — including the best monitored metric — plus available RNG state, then training begins at `TrainerState.next_epoch`. A compatibility check compares recovery-sensitive configuration values field by field; runtime-only settings (`trainer.device`, `trainer.log_every`, `trainer.epochs`, and `experiment.runs_dir`) may change, while `trainer.monitor` and `trainer.max_grad_norm` must match because they shape the recovered trajectory and the best-checkpoint standard. Configuration keys introduced after a checkpoint was saved compare as their default values, so checkpoints from earlier feature releases remain resumable. A resumed run is a new run directory whose manifest records `resume_source`.
 
 ## Experiment Artifacts
 
@@ -155,6 +159,7 @@ runs/<timestamp>_<experiment>/
   metrics.jsonl
   checkpoints/
     last.pt
+    best.pt
     emergency.pt
 ```
 
@@ -183,13 +188,13 @@ A finished run returns exit code 0 and prints `Run <status>: <run directory>`. I
 The automated suite uses synthetic and tiny tensor data for deterministic coverage of:
 
 - YAML parsing and strict unknown-section and unknown-field rejection with dotted paths;
-- cross-field shape and class-count contracts;
+- cross-field shape and class-count contracts, including structured-shape equality and flattened-product comparison;
 - registry duplicate and lookup behavior, including dataset extension through registration;
-- configurable MLP construction and option validation;
-- deterministic train and validation split behavior and epoch-sampler ordering;
+- configurable MLP and CNN construction and option validation;
+- deterministic train and validation split behavior, epoch-sampler ordering, and file-backed tensor dataset loading with preflight file errors;
 - sample-weighted metrics and evaluation-mode restoration;
-- trainer state transitions and callback event order;
-- checkpoint save/load round trips, including RNG state and format-version rejection;
+- trainer state transitions, callback event order, gradient clipping bounds, and best-checkpoint tracking;
+- checkpoint save/load round trips, including RNG state, best-metric continuity, and format-version rejection;
 - interrupted-run emergency snapshots, resumed epoch and step continuity, and resumed-versus-uninterrupted parameter equality;
 - run artifact contents and CLI exit behavior;
 - one end-to-end synthetic training and resume flow.
