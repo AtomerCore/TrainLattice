@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from trainlattice.callbacks.base import Callback
@@ -34,11 +35,12 @@ class LoggingCallback(Callback):
 
 
 class CheckpointCallback(Callback):
-    """Persist the latest and emergency checkpoints."""
+    """Persist the latest, best, and emergency checkpoints."""
 
-    def __init__(self, manager: CheckpointManager, config: dict) -> None:
+    def __init__(self, manager: CheckpointManager, config: dict, *, monitor: str = "val_loss") -> None:
         self.manager = manager
         self.config = config
+        self.monitor = monitor
 
     def _save(self, trainer: "Trainer", name: str, *, resume_safe: bool = True):
         return self.manager.save(
@@ -50,8 +52,24 @@ class CheckpointCallback(Callback):
             resume_safe=resume_safe,
         )
 
+    def _improved(self, current: float, best: float | None) -> bool:
+        if best is None or not math.isfinite(best):
+            return True
+        return current < best if self.monitor == "val_loss" else current > best
+
     def on_epoch_end(self, trainer: "Trainer") -> None:
+        """Update the best metric before saving, so last.pt carries the fresh value."""
+        metric = trainer.state.latest_metrics.get(self.monitor)
+        improved = (
+            metric is not None
+            and math.isfinite(metric)
+            and self._improved(metric, trainer.state.best_metric)
+        )
+        if improved:
+            trainer.state.best_metric = metric
         self._save(trainer, "last.pt")
+        if improved:
+            self._save(trainer, "best.pt")
 
     def on_exception(self, trainer: "Trainer", exc: BaseException) -> None:
         self._save(trainer, "emergency.pt", resume_safe=False)

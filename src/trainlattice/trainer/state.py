@@ -20,6 +20,7 @@ class TrainerState:
     next_epoch: int = 0
     global_step: int = 0
     latest_metrics: dict[str, float] = field(default_factory=dict)
+    best_metric: float | None = None
     status: str = "initialized"
     started_at: str | None = None
     finished_at: str | None = None

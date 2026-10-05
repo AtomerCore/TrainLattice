@@ -151,3 +151,31 @@ def test_recovery_comparison_allows_runtime_only_changes(tmp_path: Path) -> None
     assert configs_compatible(first, second)
     assert not configs_compatible(first, changed_model)
     assert not configs_compatible(first, changed_lr)
+
+
+def test_recovery_comparison_treats_absent_newer_fields_as_defaults() -> None:
+    legacy_checkpoint = {
+        "experiment": {"name": "unit", "seed": 42, "runs_dir": "runs"},
+        "model": {"name": "mlp", "input_dim": 4},
+        "dataset": {"name": "synthetic", "batch_size": 2, "num_workers": 0, "input_shape": [4]},
+        "optimizer": {"lr": 0.01},
+        "trainer": {"epochs": 2, "device": "cpu", "validate_every": 1, "log_every": 10},
+    }
+    expected = dict(legacy_checkpoint)
+    expected["trainer"] = {**legacy_checkpoint["trainer"], "monitor": "val_loss", "max_grad_norm": None}
+
+    assert configs_compatible(legacy_checkpoint, expected)
+
+    changed = dict(expected)
+    changed["trainer"] = {**expected["trainer"], "monitor": "val_accuracy"}
+    assert not configs_compatible(legacy_checkpoint, changed)
+
+def test_rejects_invalid_monitor(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="trainer.monitor must be one of"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  monitor: train_loss"))
+        )
+    with pytest.raises(ConfigError, match="trainer.monitor must be one of"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  monitor: [val_loss]"))
+        )

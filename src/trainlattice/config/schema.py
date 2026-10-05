@@ -104,6 +104,7 @@ class TrainerConfig:
     device: str = "auto"
     validate_every: int = 1
     log_every: int = 10
+    monitor: str = "val_loss"
 
 
 @dataclass(slots=True)
@@ -175,6 +176,11 @@ class ExperimentConfig:
         device = self.trainer.device.strip().lower() if isinstance(self.trainer.device, str) else ""
         if not fullmatch(r"(auto|cpu|cuda|cuda:\d+)", device):
             errors.append("trainer.device must be one of: auto, cpu, cuda, cuda:N")
+        if (
+            not isinstance(self.trainer.monitor, str)
+            or self.trainer.monitor not in {"val_loss", "val_accuracy"}
+        ):
+            errors.append("trainer.monitor must be one of: val_loss, val_accuracy")
         if errors:
             raise ConfigError("; ".join(errors))
 

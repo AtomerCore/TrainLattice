@@ -125,3 +125,21 @@ def test_run_trains_on_file_backed_tensor_dataset(tmp_path: Path) -> None:
 
     assert result.state.status == "finished"
     assert (result.run_dir / "checkpoints" / "last.pt").is_file()
+
+
+def test_run_keeps_best_checkpoint_and_restores_best_metric(tmp_path: Path) -> None:
+    first = run_experiment(tiny_config(tmp_path, epochs=2), command="pytest best")
+
+    best = first.run_dir / "checkpoints" / "best.pt"
+    assert best.is_file()
+    assert first.state.best_metric is not None
+    payload = torch.load(best, weights_only=False)
+    assert payload["trainer_state"]["best_metric"] == first.state.best_metric
+
+    resumed = run_experiment(
+        tiny_config(tmp_path, epochs=3), command="pytest best resume", resume=first.run_dir
+    )
+    expected_best = min(
+        first.state.best_metric, resumed.state.latest_metrics["val_loss"]
+    )
+    assert resumed.state.best_metric == expected_best

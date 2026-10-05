@@ -259,3 +259,81 @@ def test_checkpoint_rejects_unsupported_format_version(tmp_path: Path) -> None:
 
     with pytest.raises(CheckpointError, match="unsupported checkpoint format version"):
         manager.load(legacy, model=model, optimizer=optimizer)
+
+
+def test_best_checkpoint_tracks_monitored_metric_direction(tmp_path: Path) -> None:
+    manager = CheckpointManager(tmp_path / "checkpoints")
+    loss_callback = CheckpointCallback(manager, {}, monitor="val_loss")
+    accuracy_callback = CheckpointCallback(manager, {}, monitor="val_accuracy")
+
+    assert loss_callback._improved(0.5, None)
+    assert loss_callback._improved(0.4, 0.5)
+    assert not loss_callback._improved(0.6, 0.5)
+    assert accuracy_callback._improved(0.6, 0.5)
+    assert not accuracy_callback._improved(0.4, 0.5)
+
+
+def test_best_checkpoint_written_on_improvement(tmp_path: Path) -> None:
+    model = nn.Linear(4, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    manager = CheckpointManager(tmp_path / "checkpoints")
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        loss_fn=nn.CrossEntropyLoss(),
+        device=torch.device("cpu"),
+        epochs=1,
+        callbacks=[CheckpointCallback(manager, {})],
+    )
+
+    trainer.fit(loader(), loader())
+
+    best = tmp_path / "checkpoints" / "best.pt"
+    assert best.is_file()
+    assert trainer.state.best_metric is not None
+    assert trainer.state.best_metric == trainer.state.latest_metrics["val_loss"]
+    restored_model = nn.Linear(4, 2)
+    restored_optimizer = torch.optim.SGD(restored_model.parameters(), lr=0.1)
+    restored_state = manager.load(best, model=restored_model, optimizer=restored_optimizer)
+    assert restored_state.best_metric == trainer.state.best_metric
+
+
+def test_last_checkpoint_carries_the_fresh_best_metric(tmp_path: Path) -> None:
+    model = nn.Linear(4, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    manager = CheckpointManager(tmp_path / "checkpoints")
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        loss_fn=nn.CrossEntropyLoss(),
+        device=torch.device("cpu"),
+        epochs=2,
+        callbacks=[CheckpointCallback(manager, {})],
+    )
+
+    trainer.fit(loader(), loader())
+
+    payload = torch.load(tmp_path / "checkpoints" / "last.pt", weights_only=False)
+    assert payload["trainer_state"]["best_metric"] == trainer.state.best_metric
+
+
+def test_nan_metric_never_becomes_the_best(tmp_path: Path) -> None:
+    model = nn.Linear(4, 2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    manager = CheckpointManager(tmp_path / "checkpoints")
+    callback = CheckpointCallback(manager, {})
+    state = TrainerState(latest_metrics={"val_loss": float("nan")})
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        loss_fn=nn.CrossEntropyLoss(),
+        device=torch.device("cpu"),
+        epochs=1,
+        callbacks=[callback],
+        state=state,
+    )
+
+    callback.on_epoch_end(trainer)
+
+    assert state.best_metric is None
+    assert not (tmp_path / "checkpoints" / "best.pt").exists()

@@ -92,7 +92,9 @@ def run_experiment(
     callbacks = [
         LoggingCallback(metric_logger, log_every=config.trainer.log_every),
     ]
-    callbacks.append(CheckpointCallback(manager, config.to_dict()))
+    callbacks.append(
+        CheckpointCallback(manager, config.to_dict(), monitor=config.trainer.monitor)
+    )
     if resume is not None:
         try:
             state = manager.load(
