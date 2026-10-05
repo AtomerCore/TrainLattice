@@ -83,7 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = _parser().parse_args(argv)
         _configure_logging(getattr(args, "verbose", False))
         return dispatch(args)
-    except (TrainLatticeError, OSError, ValueError) as exc:
+    except (TrainLatticeError, OSError, ValueError, RuntimeError) as exc:
         logger.error("%s", exc)
         return 2
 

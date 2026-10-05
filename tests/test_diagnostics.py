@@ -140,6 +140,52 @@ def test_cli_error_exits_2_through_error_channel(
     assert "TrainLattice error:" not in err
 
 
+DEVICE_CONFIG = """
+experiment:
+  name: device-test
+model:
+  name: mlp
+dataset:
+  name: synthetic
+trainer:
+  device: tpu
+"""
+
+
+def test_cli_translates_unsupported_device_through_error_channel(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = tmp_path / "device.yaml"
+    config.write_text(DEVICE_CONFIG, encoding="utf-8")
+
+    assert main(["train", str(config)]) == 2
+
+    err = capsys.readouterr().err
+    assert "[ERROR] trainlattice.cli.main:" in err
+    assert "trainer.device must be one of" in err
+
+
+def test_cli_translates_runtime_failures_with_exit_code_2(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "runtime-failure.yaml"
+    config.write_text("experiment:\n  name: runtime-failure\n", encoding="utf-8")
+
+    def explode(path, *, resume=None, command="trainlattice train"):
+        raise RuntimeError("simulated runtime failure")
+
+    monkeypatch.setattr("trainlattice.cli.main.run_from_file", explode)
+
+    assert main(["train", str(config)]) == 2
+
+    err = capsys.readouterr().err
+    assert "[ERROR] trainlattice.cli.main:" in err
+    assert "simulated runtime failure" in err
+
+
 def test_configure_logging_is_idempotent_and_routes_by_severity(capsys: pytest.CaptureFixture[str]) -> None:
     _configure_logging(verbose=False)
     _configure_logging(verbose=False)

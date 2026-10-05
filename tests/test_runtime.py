@@ -15,7 +15,8 @@ from trainlattice.config.schema import (
     TrainerConfig,
 )
 from trainlattice.runtime.runner import run_experiment
-from trainlattice.errors import ConfigError
+from trainlattice.runtime.device import select_device
+from trainlattice.errors import ConfigError, TrainLatticeError
 
 
 def tiny_config(tmp_path: Path, epochs: int = 1) -> ExperimentConfig:
@@ -79,3 +80,10 @@ def test_cross_component_validation_rejects_class_count_mismatch(tmp_path: Path)
         run_experiment(config, command="pytest incompatible")
 
     assert not Path(config.experiment.runs_dir).exists()
+
+
+def test_device_selection_reports_unsupported_requests() -> None:
+    with pytest.raises(TrainLatticeError, match="unsupported device 'tpu'"):
+        select_device("tpu")
+    with pytest.raises(TrainLatticeError, match="unsupported device 'foo'"):
+        select_device("foo")

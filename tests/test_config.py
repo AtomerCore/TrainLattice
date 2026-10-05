@@ -64,6 +64,11 @@ def test_rejects_invalid_scalar_types(tmp_path: Path) -> None:
         load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", 'epochs: "two"')))
 
 
+def test_rejects_device_outside_supported_domain(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="trainer.device must be one of"):
+        load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  device: tpu")))
+
+
 def test_contract_comparison_reports_both_mismatch_kinds() -> None:
     model = ComponentContract(input_dim=4, num_classes=2)
     dataset = ComponentContract(input_dim=5, num_classes=10)

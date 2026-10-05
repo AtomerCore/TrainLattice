@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+from re import fullmatch
 from typing import Any, Mapping
 
 from trainlattice.errors import ConfigError
@@ -171,8 +172,9 @@ class ExperimentConfig:
             errors.append("trainer.log_every must be an integer")
         elif self.trainer.log_every < 1:
             errors.append("trainer.log_every must be at least 1")
-        if not isinstance(self.trainer.device, str) or not self.trainer.device.strip():
-            errors.append("trainer.device must be a non-empty string")
+        device = self.trainer.device.strip().lower() if isinstance(self.trainer.device, str) else ""
+        if not fullmatch(r"(auto|cpu|cuda|cuda:\d+)", device):
+            errors.append("trainer.device must be one of: auto, cpu, cuda, cuda:N")
         if errors:
             raise ConfigError("; ".join(errors))
 
