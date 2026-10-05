@@ -104,6 +104,35 @@ def test_contract_comparison_skips_unstated_input_dim() -> None:
     assert compare_contracts(ComponentContract(4, 3), stated) == []
 
 
+def test_contract_comparison_reports_structured_shape_mismatch() -> None:
+    model = ComponentContract(input_dim=None, num_classes=10, input_shape=(1, 28, 28))
+    dataset = ComponentContract(input_dim=3072, num_classes=10, input_shape=(3, 32, 32))
+
+    errors = compare_contracts(model, dataset)
+
+    assert errors == [
+        "model.input_shape ([1, 28, 28]) must match dataset.input_shape ([3, 32, 32])"
+    ]
+
+
+def test_contract_comparison_crosses_input_dim_against_shape_product() -> None:
+    model = ComponentContract(input_dim=100, num_classes=10)
+    dataset = ComponentContract(input_dim=None, num_classes=10, input_shape=(1, 28, 28))
+
+    errors = compare_contracts(model, dataset)
+
+    assert errors == [
+        "model.input_dim (100) must match dataset.input_shape product (784)"
+    ]
+
+
+def test_contract_comparison_accepts_matching_structured_shapes() -> None:
+    model = ComponentContract(input_dim=None, num_classes=10, input_shape=(1, 28, 28))
+    dataset = ComponentContract(input_dim=None, num_classes=10, input_shape=(1, 28, 28))
+
+    assert compare_contracts(model, dataset) == []
+
+
 def test_recovery_comparison_allows_runtime_only_changes(tmp_path: Path) -> None:
     first = load_config(write_config(tmp_path))
     second = load_config(

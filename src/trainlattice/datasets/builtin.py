@@ -60,7 +60,7 @@ def _validate_synthetic(path: str, options: Mapping[str, Any]) -> None:
 
 
 def _synthetic_contract(options: Mapping[str, Any]) -> ComponentContract:
-    """State the synthetic flattened input width and class count."""
+    """State the synthetic input shape, flattened width, and class count."""
     shape = options.get("input_shape", [1, 28, 28])
     well_formed = isinstance(shape, (list, tuple)) and shape and all(
         isinstance(value, int) and not isinstance(value, bool) and value >= 1 for value in shape
@@ -68,6 +68,7 @@ def _synthetic_contract(options: Mapping[str, Any]) -> ComponentContract:
     return ComponentContract(
         input_dim=prod(shape) if well_formed else None,
         num_classes=options.get("num_classes", 10),
+        input_shape=tuple(shape) if well_formed else None,
     )
 
 
