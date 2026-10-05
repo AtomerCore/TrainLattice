@@ -6,12 +6,14 @@ Minimal infrastructure for deep learning training.
 
 **Build. Run. Recover. Reproduce.**
 
-TrainLattice is a lightweight, transparent PyTorch training runtime for studying deep learning infrastructure from first principles. One strictly validated YAML file becomes a reproducible training run: a registered architecture (`mlp` or `cnn`) on a registered dataset (`synthetic` or `tensor`), the fixed AdamW optimizer, lifecycle callbacks, structured metrics, atomic checkpoints, explicit resume, and self-contained run artifacts.
+TrainLattice is a lightweight, transparent PyTorch training runtime for studying deep learning infrastructure from first principles. One strictly validated YAML file becomes a reproducible training run: a registered architecture (the built-in `mlp` or `cnn`, or a custom one registered from Python) on a registered dataset (the built-in `synthetic` or `tensor`, or a custom one), a registered optimizer (the built-in `adamw`, `adam`, or `sgd`) and loss (the built-in `cross_entropy`, `mse`, or `l1`), lifecycle callbacks, structured metrics, atomic checkpoints, explicit resume, and self-contained run artifacts.
 
 ## Features
 
 - Strict YAML experiment configuration: unknown sections and fields are rejected with dotted-path errors before a run directory is created
 - Registry-based component construction; the `mlp` and `cnn` architecture registries and the `synthetic` and `tensor` dataset registries remain visible extension points
+- Selectable optimizers (`adamw`, `adam`, `sgd` with their hyperparameters) and losses (`cross_entropy`, `mse`, `l1`) through the same registry mechanism; losses declare a task kind, so regression runs report loss without accuracy
+- Custom architectures and datasets through the same registries: importing a module registers its components, experiments start from Python via `run_experiment`/`run_from_file`, custom callbacks observe the lifecycle through `extra_callbacks`, and run manifests record where each component's code lives
 - Configurable MLP with `input_dim`, `hidden_dims`, and `num_classes`; GELU activations and 0.1 dropout
 - Configurable CNN with `input_shape`, `channels`, and `num_classes`; `Conv2d -> GELU -> MaxPool` blocks with a linear head
 - Deterministic synthetic train and validation splits plus epoch-aware shuffle sampling
@@ -78,7 +80,7 @@ runs/20261004-120000_synthetic-mlp-smoke/
 ```
 
 - `config.yaml` — the resolved configuration snapshot for the run.
-- `manifest.json` — command, Git commit, seed, status, timestamps, epoch, global step, and resume source; updated atomically through `created`, `running`, `finished`, and `failed` states.
+- `manifest.json` — command, Git commit, seed, status, timestamps, epoch, global step, resume source, and the module/file that defined the model, dataset, optimizer, and loss (`model_source`, `dataset_source`, `optimizer_source`, `loss_source`); updated atomically through `created`, `running`, `finished`, and `failed` states.
 - `environment.json` — Python, PyTorch, CUDA, platform, and selected device information.
 - `metrics.jsonl` — append-only metric records, one JSON object per line.
 - `checkpoints/last.pt` — written atomically after every completed epoch; the resume source.
@@ -125,12 +127,13 @@ trainer:
 Sections and fields:
 
 - `experiment` — `name` (default `experiment`), `seed` (default `42`), `runs_dir` (default `runs`).
-- `model` — `name` must be `mlp` or `cnn`. The `mlp` options are `input_dim` (default `784`), `hidden_dims` (default `[512, 256, 128]`), and `num_classes` (default `10`); hidden layers use GELU and 0.1 dropout. The `cnn` options are `input_shape` (default `[1, 28, 28]`), `channels` (default `[32, 64]`), and `num_classes` (default `10`); each channel block is `Conv2d(kernel 3, padding 1) -> GELU -> MaxPool(2)` followed by a linear head, and the spatial dimensions must stay divisible by the total pooling factor.
-- `dataset` — `name` must be `synthetic` or `tensor`; `batch_size` (default `64`), `num_workers` (default `0`). The `synthetic` options are `samples` (default `256`), `val_samples` (default `64`), `input_shape` (default `[1, 28, 28]`), and `num_classes` (default `10`). The `tensor` options are `root` (required), `train_file` (default `train.pt`), `val_file` (default `validation.pt`), and `num_classes` (default `10`); each file must hold a `{"features": Tensor, "labels": Tensor}` pair with matching lengths and labels below `num_classes`.
-- `optimizer` — `lr` (default `0.001`) for the fixed AdamW optimizer.
+- `model` — `name` selects the registered architecture: the built-ins `mlp` and `cnn`, or a custom one (see [Custom Components](#custom-components)). The `mlp` options are `input_dim` (default `784`), `hidden_dims` (default `[512, 256, 128]`), and `num_classes` (default `10`); hidden layers use GELU and 0.1 dropout. The `cnn` options are `input_shape` (default `[1, 28, 28]`), `channels` (default `[32, 64]`), and `num_classes` (default `10`); each channel block is `Conv2d(kernel 3, padding 1) -> GELU -> MaxPool(2)` followed by a linear head, and the spatial dimensions must stay divisible by the total pooling factor.
+- `dataset` — `name` selects the registered dataset: the built-ins `synthetic` and `tensor`, or a custom one; `batch_size` (default `64`), `num_workers` (default `0`). The `synthetic` options are `samples` (default `256`), `val_samples` (default `64`), `input_shape` (default `[1, 28, 28]`), and `num_classes` (default `10`). The `tensor` options are `root` (required), `train_file` (default `train.pt`), `val_file` (default `validation.pt`), and `num_classes` (default `10`); each file must hold a `{"features": Tensor, "labels": Tensor}` pair with matching lengths and labels below `num_classes`.
+- `optimizer` — `name` (default `adamw`) selects the registered optimizer: `adamw` or `adam` with options `betas`, `eps`, `weight_decay`, `amsgrad`; `sgd` with options `momentum`, `dampening`, `weight_decay`, `nesterov`; `lr` (default `0.001`) applies to every optimizer. Omitting the section keeps AdamW with the configured learning rate.
+- `loss` — `name` (default `cross_entropy`) selects the registered loss: `cross_entropy` (classification; options `label_smoothing`, `ignore_index`, `reduction`) or `mse`/`l1` (regression; option `reduction`). A regression loss makes the trainer report loss only — `trainer.monitor` must then stay `val_loss` — and dataset targets must be float tensors shaped like the model outputs. Omitting the section keeps cross entropy.
 - `trainer` — `epochs` (default `1`), `device` (`auto`, `cpu`, `cuda`, or `cuda:N`), `validate_every` (default `1`), `log_every` (default `10`), `monitor` (`val_loss` or `val_accuracy`, default `val_loss`; drives `best.pt`), and `max_grad_norm` (default `null`, disabled; clips gradients by total norm before the optimizer step).
 
-Two cross-field contracts are enforced between the model and dataset: the input dimensions must agree — an exact `input_shape` match when both sides state one, otherwise the flattened product — and `model.num_classes` must equal `dataset.num_classes`. Unknown sections, fields, and component options are rejected with dotted paths such as `optimizer.weight_decay` or `model.kernel_size`.
+Two cross-field contracts are enforced between the model and dataset: the input dimensions must agree — an exact `input_shape` match when both sides state one, otherwise the flattened product — and the model's output width must equal the dataset's declared width. For classification this width is the class count (`num_classes` on both sides); for regression it is the target width (a scalar target declares `num_classes: 1` on both sides). Unknown sections, fields, and component options are rejected with dotted paths such as `optimizer.weight_decay` or `model.kernel_size`.
 
 The `tensor` dataset reads plain local files. Generate an example pair once with PyTorch and train on it:
 
@@ -154,6 +157,41 @@ for name, count in (("train.pt", 256), ("validation.pt", 64)):
 
 ```powershell
 python -m trainlattice train configs/tensor_mlp.yaml
+```
+
+## Custom Components
+
+Architectures, datasets, optimizers, and losses all register through the same registries the built-ins use — importing a module is what registers its components, and experiments start from Python. The smallest custom experiment:
+
+```python
+from pathlib import Path
+
+import my_model  # defines Logistic and registers "logistic"
+
+from trainlattice import run_from_file
+
+result = run_from_file(Path("my.yaml"), command="python my_experiment.py")
+```
+
+with `my.yaml` naming the components exactly like the built-ins:
+
+```yaml
+model:
+  name: logistic       # your registered architecture
+  input_dim: 2
+  num_classes: 2
+dataset:
+  name: two_blobs      # your registered dataset
+  batch_size: 16
+loss:
+  name: cross_entropy  # or mse / l1, or your own
+```
+
+Custom components receive identical validation, contract comparison, checkpointing, and resume semantics, mix freely with the built-ins, and run manifests record where each component's code lives. Custom callbacks extend the lifecycle through `extra_callbacks` the same way. The complete reference — constructor signatures, `validate`/`contract` declarations, task-aware losses, callbacks, and the error-message catalog — lives in [CUSTOMIZING.md](CUSTOMIZING.md), and runnable examples ship in `examples/`:
+
+```powershell
+python examples/custom_experiment.py      # custom architecture + dataset, classification
+python examples/regression_experiment.py  # custom dataset with the built-in mse loss and sgd optimizer
 ```
 
 ## Development

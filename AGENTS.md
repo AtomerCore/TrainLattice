@@ -4,7 +4,7 @@
 
 TrainLattice is a lightweight, transparent PyTorch training runtime for learning deep learning infrastructure from first principles. Changes must preserve a readable path from configuration to component construction, training state, callbacks, checkpointing, recovery, and reproducibility.
 
-The v0.1 scope is local, CLI-first, and single-process. Prefer small explicit abstractions over framework-like magic. Keep future extension points visible without implementing distributed training, orchestration, web services, or automated architecture search.
+The scope is local and single-process. The CLI stays the default entry for built-in components; custom components register from Python modules and start through the `run_experiment`/`run_from_file` entry points. Prefer small explicit abstractions over framework-like magic. Keep future extension points visible without implementing distributed training, orchestration, web services, or automated architecture search.
 
 ## Required Reading
 
@@ -23,12 +23,14 @@ When a request conflicts with these documents, follow the user's current request
 - `src/trainlattice/registry/`: the generic registry class used by modeling and datasets.
 - `src/trainlattice/modeling/`: architecture registration, validation, and the MLP builder.
 - `src/trainlattice/datasets/`: the synthetic dataset registration and data-loader factories.
+- `src/trainlattice/optim/`: optimizer registration, validation, and construction.
 - `src/trainlattice/runtime/`: experiment orchestration, environment capture, and seeding.
 - `src/trainlattice/trainer/`: the training lifecycle, sample-weighted metrics, and serializable runtime state.
 - `src/trainlattice/callbacks/`: lifecycle extensions such as logging and checkpointing.
 - `src/trainlattice/checkpoint/`: checkpoint serialization and restoration.
 - `src/trainlattice/logging/`: structured metric sinks.
 - `configs/`: runnable example configurations.
+- `examples/`: custom component modules and an entry script demonstrating registration and the Python entry points.
 - `tests/`: behavior-focused automated tests mirroring package boundaries.
 - `runs/`: generated experiment artifacts; keep only its placeholder under version control.
 
@@ -39,7 +41,7 @@ When a request conflicts with these documents, follow the user's current request
 3. Checkpoints include the model, optimizer, trainer state, resolved configuration, and random-number-generator state.
 4. Registries map stable lowercase names to constructors with optional validate and contract declarations. Import-time registration is limited to the component modules that own each registry.
 5. Configuration is validated before model, dataset, optimizer, or trainer construction. Error messages must identify the invalid dotted path.
-6. Model customization is structured through supported architecture parameters and dataset options.
+6. Model, dataset, optimizer, and loss customization is structured through supported component options or through components registered in the extension-point registries from modules imported before the experiment starts; losses additionally declare the task kind that drives metrics.
 7. Generated run artifacts are self-contained enough to inspect and resume locally.
 8. Optional dependencies must fail at the feature boundary with an actionable message, not at package import time.
 
@@ -66,7 +68,7 @@ When a request conflicts with these documents, follow the user's current request
 
 ## Documentation
 
-- Keep `README.md`, example YAML files, CLI help, and `ARCHITECTURE.md` aligned with implemented behavior.
+- Keep `README.md`, `README.zh-CN.md`, `CUSTOMIZING.md`, `CUSTOMIZING.zh-CN.md`, example YAML files, CLI help, and `ARCHITECTURE.md` aligned with implemented behavior.
 - Examples must use supported configuration keys and commands.
 - Describe the current system and its invariants directly.
 
