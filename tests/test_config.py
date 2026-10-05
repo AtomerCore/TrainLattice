@@ -69,6 +69,19 @@ def test_rejects_device_outside_supported_domain(tmp_path: Path) -> None:
         load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  device: tpu")))
 
 
+def test_reports_directory_paths_explicitly(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="configuration path is a directory, not a file"):
+        load_config(tmp_path)
+
+
+def test_reports_empty_files_explicitly(tmp_path: Path) -> None:
+    config = tmp_path / "empty.yaml"
+    config.write_text("", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="configuration file is empty"):
+        load_config(config)
+
+
 def test_contract_comparison_reports_both_mismatch_kinds() -> None:
     model = ComponentContract(input_dim=4, num_classes=2)
     dataset = ComponentContract(input_dim=5, num_classes=10)
