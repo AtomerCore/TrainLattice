@@ -1,6 +1,6 @@
 """Named component registries."""
 
-from .registry import Registry
+from .registry import Registration, Registry
 
-__all__ = ["Registry"]
+__all__ = ["Registration", "Registry"]
 
