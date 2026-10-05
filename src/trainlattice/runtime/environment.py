@@ -6,10 +6,14 @@ import json
 import platform
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 import torch
+
+_REPLACE_ATTEMPTS = 3
+_REPLACE_BACKOFF_SECONDS = 0.1
 
 
 def git_commit(cwd: str | Path | None = None) -> str | None:
@@ -46,11 +50,24 @@ def collect_environment() -> dict[str, Any]:
     }
 
 
+def _replace_with_retry(temporary: Path, target: Path) -> None:
+    """Replace the target atomically, tolerating transient sharing locks."""
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            temporary.replace(target)
+            return
+        except OSError:
+            if attempt + 1 == _REPLACE_ATTEMPTS:
+                temporary.unlink(missing_ok=True)
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
+
+
 def write_json(data: dict[str, Any], path: str | Path) -> None:
     """Atomically write a human-readable JSON object."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(target.suffix + ".tmp")
     temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    temporary.replace(target)
+    _replace_with_retry(temporary, target)
 
