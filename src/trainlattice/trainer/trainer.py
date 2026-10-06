@@ -75,6 +75,19 @@ class Trainer:
             raise TypeError("training batches must contain inputs and targets")
         return batch[0], batch[1]
 
+    def _backward_loss(self, loss: Tensor) -> None:
+        """Backpropagate the natural scalar; element-wise losses collapse to their mean."""
+        (loss.mean() if loss.numel() > 1 else loss).backward()
+
+    def _mean_loss(self, loss: Tensor, samples: int) -> Tensor:
+        """Normalize a batch loss to its per-sample mean for sample-weighted metrics."""
+        reduction = getattr(self.loss_fn, "reduction", "mean")
+        if reduction == "none":
+            return loss.mean()
+        if reduction == "sum":
+            return loss / samples
+        return loss
+
     def fit(self, train_loader: DataLoader[Any], validation_loader: DataLoader[Any] | None = None) -> TrainerState:
         """Execute the configured lifecycle from the state's next epoch."""
         try:
@@ -117,11 +130,13 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
             logits = self.model(inputs)
             loss = self.loss_fn(logits, targets)
-            loss.backward()
+            self._backward_loss(loss)
             if self.max_grad_norm is not None:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             self.optimizer.step()
-            self.batch_metrics = totals.update(logits.detach(), targets, loss.detach())
+            self.batch_metrics = totals.update(
+                logits.detach(), targets, self._mean_loss(loss.detach(), targets.shape[0])
+            )
             self.state.global_step += 1
             self._emit("on_batch_end")
         return totals.compute("training")
@@ -137,7 +152,7 @@ class Trainer:
                     inputs, targets = self._unpack_batch(batch)
                     inputs, targets = inputs.to(self.device), targets.to(self.device)
                     logits = self.model(inputs)
-                    totals.update(logits, targets, self.loss_fn(logits, targets))
+                    totals.update(logits, targets, self._mean_loss(self.loss_fn(logits, targets), targets.shape[0]))
             return totals.compute("validation")
         finally:
             self.model.train(was_training)

@@ -84,6 +84,30 @@ def test_trainer_rejects_unknown_task_kinds() -> None:
         )
 
 
+def test_trainer_aggregates_reductions_as_per_sample_means() -> None:
+    from torch.utils.data import DataLoader
+    from trainlattice.trainer.trainer import Trainer
+
+    inputs = torch.linspace(-1.0, 1.0, 6).unsqueeze(1)
+    loader = DataLoader(TensorDataset(inputs, inputs * 0.5), batch_size=4)
+
+    def run_with(reduction: str) -> dict[str, float]:
+        torch.manual_seed(0)
+        model = nn.Linear(1, 1)
+        trainer = Trainer(
+            model=model,
+            optimizer=torch.optim.SGD(model.parameters(), lr=0.0),
+            loss_fn=nn.MSELoss(reduction=reduction),
+            device=torch.device("cpu"),
+            epochs=1,
+        )
+        return trainer.train_epoch(loader)
+
+    mean_metrics = run_with("mean")
+    assert run_with("sum") == pytest.approx(mean_metrics)
+    assert run_with("none") == pytest.approx(mean_metrics)
+
+
 def build_sine(
     *,
     train: bool,
@@ -141,6 +165,18 @@ def test_regression_run_reports_loss_only_and_resumes(tmp_path: Path) -> None:
 
     resumed = run_experiment(regression_config(tmp_path, epochs=2), command="pytest sine resume", resume=first.run_dir)
     assert resumed.state.next_epoch == 2
+
+
+def test_regression_run_accepts_sum_and_none_reductions(tmp_path: Path) -> None:
+    from trainlattice.datasets import DATASETS
+
+    DATASETS.register("sine", build_sine, validate=_validate_sine, contract=_sine_contract)
+    for reduction in ("sum", "none"):
+        config = regression_config(tmp_path)
+        config.loss = LossConfig("mse", {"reduction": reduction})
+        result = run_experiment(config, command=f"pytest mse {reduction}")
+        assert result.state.status == "finished"
+        assert math.isfinite(result.state.latest_metrics["val_loss"])
 
 
 def test_accuracy_monitor_requires_classification_loss(tmp_path: Path) -> None:

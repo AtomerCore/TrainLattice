@@ -113,7 +113,7 @@ Conventions:
 
 - Losses register through `register_loss`, which additionally requires a **task kind**: `classification` or `regression`.
 - The task drives metrics: classification losses report loss and accuracy; regression losses report loss only. It also constrains `trainer.monitor` — `val_accuracy` requires a classification loss.
-- YAML: `loss: {name: huber}` with loss-specific options passed through (`reduction`, and for `cross_entropy` also `label_smoothing`, `ignore_index`).
+- YAML: `loss: {name: huber}` with loss-specific options passed through (`reduction`, and for `cross_entropy` also `label_smoothing`, `ignore_index`). Metrics aggregate the per-sample mean regardless of `reduction`; `sum` keeps its larger gradient scale.
 
 ## A Complete Custom Experiment
 

@@ -113,7 +113,7 @@ register_loss("huber", torch.nn.SmoothL1Loss, task="regression", validate=...)
 
 - 损失经 `register_loss` 注册，它额外要求声明**任务形态**：`classification` 或 `regression`。
 - 任务驱动指标：分类损失报告损失与准确率；回归损失只报告损失。它同时约束 `trainer.monitor`——`val_accuracy` 需要分类损失。
-- YAML：`loss: {name: huber}`，损失特有选项透传（`reduction`；`cross_entropy` 另有 `label_smoothing`、`ignore_index`）。
+- YAML：`loss: {name: huber}`，损失特有选项透传（`reduction`；`cross_entropy` 另有 `label_smoothing`、`ignore_index`）。无论 `reduction` 取何值，指标一律按每样本均值聚合；`sum` 保留其更大的梯度尺度。
 
 ## 一个完整的自定义实验
 
