@@ -108,6 +108,12 @@ def test_trainer_aggregates_reductions_as_per_sample_means() -> None:
     assert run_with("none") == pytest.approx(mean_metrics)
 
 
+def test_loss_task_points_to_register_loss_for_taskless_registrations() -> None:
+    LOSSES.register("taskless", nn.SmoothL1Loss)
+    with pytest.raises(RegistryError, match="without a task kind; use register_loss"):
+        loss_task("taskless")
+
+
 def build_sine(
     *,
     train: bool,

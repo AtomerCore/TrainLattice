@@ -86,6 +86,10 @@ def loss_task(name: str) -> str:
     try:
         return LOSS_TASKS[key]
     except KeyError as exc:
+        if key in LOSSES:
+            raise RegistryError(
+                f"loss {name!r} was registered without a task kind; use register_loss to declare one"
+            ) from exc
         choices = ", ".join(LOSSES.names()) or "none"
         raise RegistryError(f"unknown loss {name!r}; available: {choices}") from exc
 
