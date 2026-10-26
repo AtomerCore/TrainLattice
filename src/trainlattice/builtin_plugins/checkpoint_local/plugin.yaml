@@ -1,0 +1,10 @@
+schema_version: 1
+id: org.trainlattice.checkpoint.local
+version: 0.5.0
+api_version: 1
+entry: plugin.py:activate
+provides:
+  - service: trainlattice.checkpoint/local
+requires: {}
+state:
+  mode: stateless

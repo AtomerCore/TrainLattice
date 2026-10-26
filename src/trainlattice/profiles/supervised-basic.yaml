@@ -5,3 +5,4 @@ plugins:
   - source: builtin://optim-basic
   - source: builtin://tasks-basic
   - source: builtin://losses-basic
+  - source: builtin://checkpoint-local

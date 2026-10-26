@@ -27,9 +27,13 @@ class TrainerState:
     stop_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        """Return every persisted training-state field."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrainerState":
+        """Restore a complete state record from the current checkpoint schema."""
         allowed = {field.name for field in cls.__dataclass_fields__.values()}
-        return cls(**{key: value for key, value in data.items() if key in allowed})
+        if not isinstance(data, dict) or set(data) != allowed:
+            raise ValueError("checkpoint trainer state fields do not match the current schema")
+        return cls(**data)
