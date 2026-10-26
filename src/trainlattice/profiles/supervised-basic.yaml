@@ -6,3 +6,6 @@ plugins:
   - source: builtin://tasks-basic
   - source: builtin://losses-basic
   - source: builtin://checkpoint-local
+  - source: builtin://metrics-basic
+  - source: builtin://logging-basic
+  - source: builtin://callbacks-basic

@@ -5,12 +5,12 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from trainlattice.callbacks.base import Callback
-from trainlattice.checkpoint import CheckpointManager
-from trainlattice.logging import Logger
+from trainlattice.contracts.callbacks import Callback
+from trainlattice.contracts.training import CheckpointStore as CheckpointManager
+from trainlattice.contracts.training import MetricLogger as Logger
 
 if TYPE_CHECKING:
-    from trainlattice.trainer.trainer import Trainer
+    from trainlattice.contracts.training import TrainerView as Trainer
 
 
 class LoggingCallback(Callback):

@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from trainlattice.trainer.trainer import Trainer
+from trainlattice.contracts.training import TrainerView as Trainer
 
 
 class Callback:

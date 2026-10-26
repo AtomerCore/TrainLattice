@@ -1,0 +1,10 @@
+schema_version: 1
+id: org.trainlattice.callbacks.basic
+version: 0.5.0
+api_version: 1
+entry: plugin.py:activate
+provides:
+  - service: trainlattice.callbacks/basic
+requires: {}
+state:
+  mode: stateless

@@ -7,6 +7,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Iterable, TextIO
 
+from trainlattice.kernel.errors import CleanupError
+
 
 class Logger(ABC):
     """Metric sink interface."""
@@ -51,12 +53,22 @@ class CompositeLogger(Logger):
 
     def __init__(self, loggers: Iterable[Logger]) -> None:
         self.loggers = list(loggers)
+        self._closed = False
 
     def log(self, metrics: dict[str, Any], step: int) -> None:
         for logger in self.loggers:
             logger.log(metrics, step)
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        errors = []
         for logger in self.loggers:
-            logger.close()
+            try:
+                logger.close()
+            except BaseException as exc:
+                errors.append(exc)
+        if errors:
+            raise CleanupError(errors)
 
