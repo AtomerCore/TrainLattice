@@ -2,9 +2,9 @@
 
 ## Mission
 
-TrainLattice is a lightweight, transparent PyTorch training runtime for learning deep learning infrastructure from first principles. Changes must preserve a readable path from configuration to component construction, training state, callbacks, checkpointing, recovery, and reproducibility.
+TrainLattice is a lightweight, transparent deep learning training infrastructure — single-process to start — for learning how training systems work from first principles. Changes must preserve a readable path from configuration to component construction, training state, callbacks, checkpointing, recovery, and reproducibility.
 
-The scope is local and single-process. The CLI stays the default entry for built-in components; custom components register from Python modules and start through the `run_experiment`/`run_from_file` entry points. Prefer small explicit abstractions over framework-like magic. Keep future extension points visible without implementing distributed training, orchestration, web services, or automated architecture search.
+The scope starts local and single-process; distributed training is a long-term roadmap direction and is not scheduled. The CLI stays the default entry for built-in components; custom components register from Python modules and start through the `run_experiment`/`run_from_file` entry points. Prefer small explicit abstractions over framework-like magic. Keep future extension points visible without implementing orchestration, web services, or automated architecture search.
 
 ## Required Reading
 
@@ -23,7 +23,7 @@ When a request conflicts with these documents, follow the user's current request
 - `src/trainlattice/registry/`: the generic registry class used by modeling and datasets.
 - `src/trainlattice/modeling/`: architecture registration, validation, and the MLP builder.
 - `src/trainlattice/datasets/`: the synthetic dataset registration and data-loader factories.
-- `src/trainlattice/optim/`: optimizer registration, validation, and construction.
+- `src/trainlattice/optim/`: optimizer registration, validation, and construction, plus the learning-rate scheduler registry and built-ins in `optim/scheduler.py`.
 - `src/trainlattice/runtime/`: experiment orchestration, environment capture, and seeding.
 - `src/trainlattice/trainer/`: the training lifecycle, sample-weighted metrics, and serializable runtime state.
 - `src/trainlattice/callbacks/`: lifecycle extensions such as logging and checkpointing.
