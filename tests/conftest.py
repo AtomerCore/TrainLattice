@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 
 import pytest
 
@@ -11,10 +12,10 @@ import pytest
 def _reset_cli_logging() -> None:
     """Detach CLI diagnostic handlers so logging state never leaks between tests."""
     yield
-    try:
-        from trainlattice.cli.main import CLI_HANDLER_ATTR
-    except Exception:
+    cli = sys.modules.get("trainlattice.cli.main")
+    if cli is None:
         return
+    CLI_HANDLER_ATTR = cli.CLI_HANDLER_ATTR
     root = logging.getLogger()
     for handler in list(root.handlers):
         if getattr(handler, CLI_HANDLER_ATTR, False):
@@ -24,8 +25,11 @@ def _reset_cli_logging() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_component_registries():
+def _isolate_component_registries(request):
     """Restore the shared component registries after tests that extend them."""
+    if request.node.path.parent.name == "kernel":
+        yield
+        return
     try:
         from trainlattice.datasets import DATASETS
         from trainlattice.modeling import ARCHITECTURES
