@@ -118,10 +118,76 @@ class Trainer:
         self._amp_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16}.get(precision)
         # the task kind decides whether accuracy joins loss in the aggregates
         self._totals_cls = ClassificationTotals if task == "classification" else LossTotals
+        # cooperative stop flag and early-stopping patience live only in this instance
+        self._stop_requested = False
+        self._stop_reason: str | None = None
+        self._epochs_without_improvement = 0
+        # guarded by _check_early_stopping: monitored evaluations that found no best metric
+        self._unanchored_evals = 0
+        self._warned_unanchored = False
 
     def _emit(self, event: str, *args: Any) -> None:
         for callback in self.callbacks:
             getattr(callback, event)(self, *args)
+
+    def request_stop(self, reason: str) -> None:
+        """Ask ``fit`` to end the run after the current epoch's callbacks.
+
+        The flag is runtime-only state of this trainer instance: it is never
+        checkpointed, and ``state.stop_reason`` receives the reason only
+        once ``fit`` acts on the request.
+        """
+        self._stop_requested = True
+        self._stop_reason = reason
+        logger.info("stop requested: %s", reason)
+
+    def _check_early_stopping(self) -> None:
+        """Count monitored epochs without improvement and stop past patience.
+
+        The epoch that just ended compares against ``state.best_metric`` as
+        it stands before the epoch-end callbacks fold the fresh value in —
+        the checkpoint callback owns that advancement: ``val_loss`` improves
+        downward, ``val_accuracy`` upward, and only movements beyond
+        ``min_delta`` count. An epoch without a validation pass, or whose
+        metrics lack the monitored key, leaves the counter untouched. The
+        counter is instance state, so a resumed run starts counting from
+        zero while ``best_metric`` keeps its checkpointed reference.
+        Monitored evaluations that pass without any best metric to compare
+        against log a warning once, since nothing advances ``best_metric``
+        but the checkpoint callback and early stopping cannot trigger
+        without it.
+        """
+        if self.early_stopping is None:
+            return
+        metric = self.state.latest_metrics.get(self.monitor)
+        if metric is None:
+            return
+        best = self.state.best_metric
+        if best is None:
+            if self._unanchored_evals >= 1 and not self._warned_unanchored:
+                self._warned_unanchored = True
+                logger.warning(
+                    "early stopping has no best metric to compare against after %d evaluations; "
+                    "trainer.state.best_metric is advanced by CheckpointCallback, so early "
+                    "stopping cannot trigger without it",
+                    self._unanchored_evals + 1,
+                )
+            self._unanchored_evals += 1
+            improved = True
+        elif self.monitor == "val_loss":
+            improved = metric < best - self.early_stopping.min_delta
+        else:
+            improved = metric > best + self.early_stopping.min_delta
+        if improved:
+            self._epochs_without_improvement = 0
+            return
+        self._epochs_without_improvement += 1
+        if self._epochs_without_improvement > self.early_stopping.patience:
+            self.request_stop(
+                f"early stopping: {self.monitor} has not improved by more than "
+                f"{self.early_stopping.min_delta} for {self._epochs_without_improvement} "
+                f"consecutive evaluations (patience={self.early_stopping.patience})"
+            )
 
     def _emit_exception(self, exc: BaseException) -> None:
         for callback in self.callbacks:
@@ -188,6 +254,7 @@ class Trainer:
             self.model.to(self.device)
             self.state.status = "running"
             self.state.started_at = self.state.started_at or utc_now()
+            self.state.stop_reason = None
             self._emit("on_train_start")
             for epoch in range(self.state.next_epoch, self.epochs):
                 self.state.epoch = epoch
@@ -210,7 +277,12 @@ class Trainer:
                     metrics.update({f"val_{key}": value for key, value in validation_metrics.items()})
                 self.state.next_epoch = epoch + 1
                 self.state.latest_metrics = metrics
+                self._check_early_stopping()
                 self._emit("on_epoch_end")
+                if self._stop_requested:
+                    self.state.stop_reason = self._stop_reason
+                    logger.info("stopping after epoch %d: %s", epoch, self.state.stop_reason)
+                    break
             self.state.status = "finished"
             self.state.finished_at = utc_now()
             self._emit("on_train_end")

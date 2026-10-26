@@ -1,8 +1,10 @@
 """Custom callback registered into an experiment's lifecycle.
 
 Callbacks observe the trainer through the ``Callback`` hooks and extend
-the run between the built-in logging and checkpointing callbacks; they
-cannot interrupt training.
+the run between the built-in logging and checkpointing callbacks; any
+hook may call ``trainer.request_stop(reason)`` to end the run
+cooperatively — the current epoch completes, including its checkpoint,
+and the run finishes with the reason recorded in ``state.stop_reason``.
 """
 
 from __future__ import annotations

@@ -24,6 +24,7 @@ class TrainerState:
     status: str = "initialized"
     started_at: str | None = None
     finished_at: str | None = None
+    stop_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
