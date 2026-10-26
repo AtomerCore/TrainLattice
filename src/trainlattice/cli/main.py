@@ -11,7 +11,7 @@ from typing import Sequence
 
 from trainlattice import __version__
 from trainlattice.errors import TrainLatticeError
-from trainlattice.runtime.runner import run_from_file
+from trainlattice.cli.plugins import add_plugin_parser, dispatch_plugins
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="trainlattice", description="Transparent PyTorch training infrastructure")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    add_plugin_parser(subparsers)
 
     train = subparsers.add_parser("train", help="run a YAML experiment")
     train.add_argument("config", type=Path)
@@ -69,6 +70,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def dispatch(args: argparse.Namespace) -> int:
     """Dispatch parsed CLI arguments."""
+    if args.command == "plugins":
+        return dispatch_plugins(args)
+    from trainlattice.runtime.runner import run_from_file
+
     command = " ".join(shlex.quote(item) for item in ["trainlattice", "train", str(args.config)])
     if args.resume:
         command = " ".join([command, shlex.quote(args.resume)])

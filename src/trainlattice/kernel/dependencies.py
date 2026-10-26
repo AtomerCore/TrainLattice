@@ -11,6 +11,7 @@ from typing import Any
 from .errors import PluginError
 from .manifest import PluginManifest, ProvidedService
 from .sources import PluginRequest, PluginSource, PluginSourceResolver
+from .snapshot import content_fingerprint, contracts_fingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +29,8 @@ class PluginPlan:
     """A topologically ordered plugin assembly description."""
 
     plugins: tuple[PlannedPlugin, ...]
+    fingerprints: Mapping[str, str]
+    contracts_fingerprint: str
 
 
 class DependencyResolver:
@@ -106,4 +109,4 @@ class DependencyResolver:
 
         for plugin_id in plugins:
             visit(plugin_id)
-        return PluginPlan(tuple(ordered))
+        return PluginPlan(tuple(ordered), MappingProxyType({item.manifest.id: content_fingerprint(item.manifest.root) for item in ordered}), contracts_fingerprint())

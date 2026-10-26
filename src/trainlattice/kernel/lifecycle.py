@@ -15,6 +15,7 @@ from .errors import CleanupError, PluginError
 from .loader import PluginLoader
 from .services import ServiceRegistry
 from .sources import PluginRequest, PluginSourceResolver
+from .snapshot import PluginSnapshot, content_fingerprint, contracts_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class Application:
 
     def __init__(self, plan: PluginPlan, services: ServiceRegistry, contexts: list[PluginContextImpl], state_providers: dict[str, StateProvider]) -> None:
         self.plan = plan
+        self.snapshot = PluginSnapshot.from_plan(plan)
         self._services = services
         self._contexts = contexts
         self.state_providers = MappingProxyType(state_providers)
@@ -98,6 +100,11 @@ class PluginManager:
 
     def activate(self, plan: PluginPlan) -> Application:
         """Activate in dependency order or revoke every completed effect."""
+        if contracts_fingerprint() != plan.contracts_fingerprint:
+            raise PluginError("shared contracts changed after dependency planning")
+        for plugin in plan.plugins:
+            if content_fingerprint(plugin.manifest.root) != plan.fingerprints[plugin.manifest.id]:
+                raise PluginError(f"{plugin.manifest.id}: plugin source changed after dependency planning")
         services = ServiceRegistry()
         contexts = []
         providers = {}
