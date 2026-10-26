@@ -6,23 +6,27 @@ Minimal infrastructure for deep learning training.
 
 **Build. Run. Recover. Reproduce.**
 
-TrainLattice is a lightweight, transparent PyTorch training runtime for studying deep learning infrastructure from first principles. One strictly validated YAML file becomes a reproducible training run: a registered architecture (the built-in `mlp` or `cnn`, or a custom one registered from Python) on a registered dataset (the built-in `synthetic` or `tensor`, or a custom one), a registered optimizer (the built-in `adamw`, `adam`, or `sgd`) and loss (the built-in `cross_entropy`, `mse`, or `l1`), lifecycle callbacks, structured metrics, atomic checkpoints, explicit resume, and self-contained run artifacts.
+TrainLattice is a lightweight, transparent PyTorch training runtime for studying deep learning infrastructure from first principles. One strictly validated YAML file becomes a reproducible training run: a registered architecture (the built-in `mlp` or `cnn`, or a custom one registered from Python) on a registered dataset (the built-in `synthetic` or `tensor`, or a custom one), a registered optimizer (the built-in `adamw`, `adam`, or `sgd`), an optional registered learning-rate scheduler (the built-in `warmup_cosine`, `warmup_linear`, or `step_decay`), and a registered loss (the built-in `cross_entropy`, `mse`, or `l1`), with lifecycle callbacks, structured metrics, atomic checkpoints, explicit resume, and self-contained run artifacts.
 
 ## Features
 
 - Strict YAML experiment configuration: unknown sections and fields are rejected with dotted-path errors before a run directory is created
 - Registry-based component construction; the `mlp` and `cnn` architecture registries and the `synthetic` and `tensor` dataset registries remain visible extension points
 - Selectable optimizers (`adamw`, `adam`, `sgd` with their hyperparameters) and losses (`cross_entropy`, `mse`, `l1`) through the same registry mechanism; losses declare a task kind, so regression runs report loss without accuracy
+- Optional learning-rate schedulers (`warmup_cosine`, `warmup_linear` with warmup and floor, `step_decay` as a staircase) through the same registry; metric records carry the learning rate each optimizer step applied, and epoch records the end-of-epoch rate the next step would apply
 - Custom architectures and datasets through the same registries: importing a module registers its components, experiments start from Python via `run_experiment`/`run_from_file`, custom callbacks observe the lifecycle through `extra_callbacks`, and run manifests record where each component's code lives
 - Configurable MLP with `input_dim`, `hidden_dims`, and `num_classes`; GELU activations and 0.1 dropout
 - Configurable CNN with `input_shape`, `channels`, and `num_classes`; `Conv2d -> GELU -> MaxPool` blocks with a linear head
 - Deterministic synthetic train and validation splits plus epoch-aware shuffle sampling
 - File-backed `tensor` dataset reading `train.pt`/`validation.pt` tensor pairs from a local directory; nothing is downloaded
 - Explicit `Trainer` lifecycle and serializable `TrainerState`
-- Console and JSONL structured metric logging with sample-weighted loss and accuracy
+- Console and JSONL structured metric logging with sample-weighted loss and accuracy, plus learning-rate and throughput measurements on every batch and epoch record: batch records carry the `lr` their optimizer step applied and the epoch-to-date `steps_per_sec`/`samples_per_sec` averages (data waits included), epoch records carry `lr` (the end-of-epoch rate the next optimizer step would apply), `epoch_seconds`, `data_seconds` (time spent waiting for batches), `train_samples_per_sec`, and `max_memory_mb` on CUDA devices
 - Structured diagnostic logging in `[LEVEL] logger.name: message` format: INFO and below go to stdout, WARNING and above go to stderr, Python warnings are captured into the same format, and `--verbose` enables debug-level diagnostics
-- Atomic checkpoints (format v3) holding model, optimizer, trainer state, resolved configuration, and RNG state: `last.pt` after every epoch, `best.pt` whenever the monitored validation metric improves, plus a diagnostic `emergency.pt` when training fails
+- Atomic checkpoints (format v4) holding model, optimizer, scheduler state and its resolved step budget when configured, fp16 scaler state under mixed precision, trainer state, resolved configuration, and RNG state: `last.pt` after every epoch, `best.pt` whenever the monitored validation metric improves, plus a diagnostic `emergency.pt` when training fails
 - Optional gradient clipping through `trainer.max_grad_norm`
+- Gradient accumulation through `trainer.accumulate`: micro-batches share one optimizer step, so a larger effective batch needs no larger `batch_size`
+- Mixed precision through `trainer.precision`: `bf16` (CPU and CUDA) and `fp16` (CUDA only) run forward passes under autocast; `fp16` adds a GradScaler whose state checkpoints and restores, and windows the scaler skips for non-finite gradients apply no update, advance no scheduler, and count no optimizer step
+- Early stopping through `trainer.early_stopping` (`patience`, `min_delta`) on the monitored validation metric, plus cooperative stops from any callback via `Trainer.request_stop`; either path saves the epoch's checkpoint before the run finishes with a recorded reason
 - Explicit `--resume PATH` recovery from the exact completed-epoch boundary with configuration compatibility checks
 - Self-contained run artifacts: `config.yaml`, `environment.json`, `manifest.json`, `metrics.jsonl`, and `checkpoints/`
 - CPU and single-CUDA-device execution with process-wide seeding
@@ -48,6 +52,8 @@ python -m trainlattice train configs/synthetic_mlp.yaml
 ```
 
 The same flow runs the convolutional example, `configs/synthetic_cnn.yaml`, unchanged. Metrics stream to the console and to `metrics.jsonl` in the new run directory. When the run finishes, the CLI prints the directory, for example `Run finished: runs/20261004-120000_synthetic-mlp-smoke`.
+
+`configs/synthetic_mlp_efficiency.yaml` trains the same model and dataset with the efficiency controls combined: a `warmup_cosine` learning-rate schedule, gradient accumulation, `bf16` mixed precision, and early stopping.
 
 Diagnostic logging is a separate channel from the metric stream. Records use the `[LEVEL] logger.name: message` format: INFO and below share stdout with the metric and result output, while WARNING and above (including Python warnings captured into the same format) go to stderr, so stderr can be archived separately. Add `--verbose` to enable debug-level diagnostics:
 
@@ -82,16 +88,16 @@ runs/20261004-120000_synthetic-mlp-smoke/
 - `config.yaml` — the resolved configuration snapshot for the run.
 - `manifest.json` — command, Git commit, seed, status, timestamps, epoch, global step, resume source, and the module/file that defined the model, dataset, optimizer, and loss (`model_source`, `dataset_source`, `optimizer_source`, `loss_source`); updated atomically through `created`, `running`, `finished`, and `failed` states.
 - `environment.json` — Python, PyTorch, CUDA, platform, and selected device information.
-- `metrics.jsonl` — append-only metric records, one JSON object per line.
+- `metrics.jsonl` — append-only metric records, one JSON object per line: one batch record every `trainer.log_every` optimizer steps and one epoch record per epoch. Batch records carry sample-weighted `loss` and `accuracy` (classification only), the `lr` that optimizer step applied, and the epoch-to-date `steps_per_sec`/`samples_per_sec` averages (data waits included). Epoch records carry `train_loss`, `train_accuracy` (classification only), `val_loss`/`val_accuracy` on epochs with a validation pass, `lr` (the end-of-epoch rate the next optimizer step would apply), `train_samples_per_sec`, `epoch_seconds`, `data_seconds` (time spent waiting for batches), plus `max_memory_mb` on CUDA devices.
 - `checkpoints/last.pt` — written atomically after every completed epoch; the resume source.
 - `checkpoints/best.pt` — written whenever the monitored validation metric (`trainer.monitor`, default `val_loss`) improves on the best value seen so far, including across resumes.
 - `checkpoints/emergency.pt` — diagnostic snapshot written when an exception interrupts training; rejected for resume.
 
-Resume restores the model, optimizer, trainer state, and available RNG state (Python, Torch, CUDA, NumPy when present), then continues at the next epoch boundary with the same sample order as an uninterrupted run. Recovery-sensitive configuration values must match the checkpoint; runtime-only settings (`trainer.device`, `trainer.log_every`, `trainer.epochs`, and `experiment.runs_dir`) may change.
+Resume restores the model, optimizer, trainer state, scheduler state when configured, fp16 scaler state when the run uses one, and available RNG state (Python, Torch, CUDA, NumPy when present), then continues at the next epoch boundary with the same sample order and learning-rate schedule as an uninterrupted run. Checkpoints of formats v3 and v4 are both resumable; the format-v4 additions are the `scheduler` and `scaler` states plus the scheduler's resolved step budget, so a resumed run keeps the schedule it started with even when `trainer.epochs` changes (a budget that differs from the freshly derived one is noted in the log). A checkpoint saved without a scheduler resumes without one — adding a `scheduler` section to it is rejected as a recovery-sensitive change. Recovery-sensitive configuration values must match the checkpoint; runtime-only settings (`trainer.device`, `trainer.log_every`, `trainer.epochs`, `trainer.early_stopping`, and `experiment.runs_dir`) may change.
 
 ## Configuration
 
-`configs/synthetic_mlp.yaml` shows the complete supported surface:
+`configs/synthetic_mlp.yaml` is a minimal smoke-test example; the complete supported surface is the sections and fields below:
 
 ```yaml
 experiment:
@@ -130,8 +136,9 @@ Sections and fields:
 - `model` — `name` selects the registered architecture: the built-ins `mlp` and `cnn`, or a custom one (see [Custom Components](#custom-components)). The `mlp` options are `input_dim` (default `784`), `hidden_dims` (default `[512, 256, 128]`), and `num_classes` (default `10`); hidden layers use GELU and 0.1 dropout. The `cnn` options are `input_shape` (default `[1, 28, 28]`), `channels` (default `[32, 64]`), and `num_classes` (default `10`); each channel block is `Conv2d(kernel 3, padding 1) -> GELU -> MaxPool(2)` followed by a linear head, and the spatial dimensions must stay divisible by the total pooling factor.
 - `dataset` — `name` selects the registered dataset: the built-ins `synthetic` and `tensor`, or a custom one; `batch_size` (default `64`), `num_workers` (default `0`). The `synthetic` options are `samples` (default `256`), `val_samples` (default `64`), `input_shape` (default `[1, 28, 28]`), and `num_classes` (default `10`). The `tensor` options are `root` (required), `train_file` (default `train.pt`), `val_file` (default `validation.pt`), and `num_classes` (default `10`); each file must hold a `{"features": Tensor, "labels": Tensor}` pair with matching lengths and labels below `num_classes`.
 - `optimizer` — `name` (default `adamw`) selects the registered optimizer: `adamw` or `adam` with options `betas`, `eps`, `weight_decay`, `amsgrad`; `sgd` with options `momentum`, `dampening`, `weight_decay`, `nesterov`; `lr` (default `0.001`) applies to every optimizer. Omitting the section keeps AdamW with the configured learning rate.
+- `scheduler` — optional; `name` selects the registered scheduler. `warmup_cosine` and `warmup_linear` take `warmup_steps` (default `0`), `total_steps` (default derived from the run: optimizer steps per epoch — `ceil(batches per epoch / trainer.accumulate)` — × `trainer.epochs`; an explicit value overrides the derived budget), and `min_lr` (default `0.0`, an absolute floor); the rate rises linearly from 0 to `optimizer.lr` over the warmup — which must end before `total_steps` — then decays, cosine or linear, to `min_lr` at `total_steps` and stays there. `step_decay` takes `step_size` (required, ≥ 1) and `gamma` (default `0.1`), multiplying the rate by `gamma` every `step_size` steps. Omitting the section keeps a constant learning rate.
 - `loss` — `name` (default `cross_entropy`) selects the registered loss: `cross_entropy` (classification; options `label_smoothing`, `ignore_index`, `reduction`) or `mse`/`l1` (regression; option `reduction`). Metrics aggregate the per-sample mean regardless of `reduction`; `sum` keeps its larger gradient scale. A regression loss makes the trainer report loss only — `trainer.monitor` must then stay `val_loss` — and dataset targets must be float tensors shaped like the model outputs. Omitting the section keeps cross entropy.
-- `trainer` — `epochs` (default `1`), `device` (`auto`, `cpu`, `cuda`, or `cuda:N`), `validate_every` (default `1`), `log_every` (default `10`), `monitor` (`val_loss` or `val_accuracy`, default `val_loss`; drives `best.pt`), and `max_grad_norm` (default `null`, disabled; clips gradients by total norm before the optimizer step).
+- `trainer` — `epochs` (default `1`), `device` (`auto`, `cpu`, `cuda`, or `cuda:N`), `validate_every` (default `1`), `log_every` (default `10`), `monitor` (`val_loss` or `val_accuracy`, default `val_loss`; drives `best.pt`), `max_grad_norm` (default `null`, disabled; clips gradients by total norm before the optimizer step), `accumulate` (default `1`; micro-batches per optimizer step — each micro-batch loss is scaled by `1 / accumulate` before backward, a partial end-of-epoch window is flushed as one final step, and `global_step` counts optimizer steps), `precision` (`fp32`, `bf16`, or `fp16`, default `fp32`; the mixed-precision modes run training and validation forward passes under autocast in that dtype — `fp16` requires a CUDA device, scales every backward through a GradScaler that is unscaled before clipping and the optimizer step, and checkpoints its state, while `bf16` needs no scaler), and `early_stopping` (optional mapping with `patience` ≥ 1 and `min_delta` ≥ 0, default `null`, disabled; each validation evaluation of `trainer.monitor` that fails to improve by more than `min_delta` counts toward `patience`, and once more than `patience` evaluations pass the run stops at that epoch boundary — the epoch's checkpoint still saves, the run ends with status `finished` and the reason recorded in the trainer state, epochs without a validation pass never count, and the counter restarts from zero after a resume while the best-metric reference carries over).
 
 Two cross-field contracts are enforced between the model and dataset: the input dimensions must agree — an exact `input_shape` match when both sides state one, otherwise the flattened product — and the model's output width must equal the dataset's declared width. For classification this width is the class count (`num_classes` on both sides); for regression it is the target width (a scalar target declares `num_classes: 1` on both sides). Unknown sections, fields, and component options are rejected with dotted paths such as `optimizer.weight_decay` or `model.kernel_size`.
 
@@ -193,6 +200,15 @@ Custom components receive identical validation, contract comparison, checkpointi
 python examples/custom_experiment.py      # custom architecture + dataset, classification
 python examples/regression_experiment.py  # custom dataset with the built-in mse loss and sgd optimizer
 ```
+
+## Roadmap
+
+The supported scope stays local and single-process. Directions under consideration for later releases, deliberately unscheduled:
+
+- Performance profiling of the training loop
+- `torch.compile` acceleration
+- Distributed training (DDP/FSDP)
+- A language-modeling task kind alongside classification and regression
 
 ## Development
 

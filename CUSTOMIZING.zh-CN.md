@@ -2,17 +2,18 @@
 
 [English](CUSTOMIZING.md) | 简体中文
 
-运行时构建的每一样东西都是注册组件。架构、数据集、优化器与损失全部活在注册表里，任何 import 了 TrainLattice 并调用 `register` 的 Python 模块都在扩展它们——没有插件加载机制、没有入口点发现、也没有"注册"本身的配置。本文档是编写自定义组件的完整参考。
+运行时构建的每一样东西都是注册组件。架构、数据集、优化器、学习率调度器与损失全部活在注册表里，任何 import 了 TrainLattice 并调用 `register` 的 Python 模块都在扩展它们——没有插件加载机制、没有入口点发现、也没有"注册"本身的配置。本文档是编写自定义组件的完整参考。
 
 ## 心智模型
 
-四个注册表即扩展点，从包顶层导出：
+五个注册表即扩展点，从包顶层导出：
 
 | 注册表 | 构建对象 | 内置 | 构造器签名 |
 |---|---|---|---|
 | `ARCHITECTURES` | 模型 | `mlp`、`cnn` | `(*, **options) -> nn.Module` |
 | `DATASETS` | 数据集 | `synthetic`、`tensor` | `(*, train, split=None, **options) -> Dataset` |
 | `OPTIMIZERS` | 优化器 | `adamw`、`adam`、`sgd` | `(params, lr=..., **options) -> Optimizer` |
+| `SCHEDULERS` | 学习率调度器 | `warmup_cosine`、`warmup_linear`、`step_decay` | `(optimizer, total_steps, **options) -> LRScheduler` |
 | `LOSSES` | 损失 | `cross_entropy`、`mse`、`l1` | `(**options) -> nn.Module`，经 `register_loss` |
 
 **import 模块即完成注册**。你的实验脚本 import 组件模块，然后经 `run_experiment` 或 `run_from_file` 启动；YAML 配置只按名字引用组件。内置组件使用的注册调用与你调用的是同一个——自定义组件获得完全相同的校验、契约比对、checkpoint 与恢复语义。
@@ -99,6 +100,27 @@ OPTIMIZERS.register("rmsprop", torch.optim.RMSprop, validate=...)
 - YAML：`optimizer: {name: rmsprop, lr: 0.001, alpha: 0.99}`——除 `name` 与 `lr` 外的每个键都作为选项透传。
 - 优化器没有契约声明；`validate` 是唯一的可选声明。
 
+### 调度器
+
+```python
+from torch.optim.lr_scheduler import ExponentialLR
+
+from trainlattice import SCHEDULERS
+
+
+def build_exponential(optimizer, _total_steps, *, gamma=0.9):
+    return ExponentialLR(optimizer, gamma=gamma)
+
+
+SCHEDULERS.register("exponential", build_exponential, validate=...)
+```
+
+约定：
+
+- 构造器**按位置**接收优化器，随后是解析后的 `total_steps` 整数（调度器选项优先于由运行推导的值：每 epoch 优化器步数 —— `ceil(每 epoch 批次数 / trainer.accumulate)` —— × `trainer.epochs`），再是 YAML 选项关键字：`constructor(optimizer, total_steps, **options)`。不按步数预算规划的学习率调度器忽略第二个参数，其 `validate` 会把 `total_steps` 当作未知选项拒绝。
+- 训练循环在每次实际生效的 `optimizer.step()` 之后步进一次调度器；checkpoint 格式 v4 持久化调度器状态及其解析后的步数预算，续训因此延续运行开始时的调度曲线；未配置调度器的检查点恢复时同样不带调度器。
+- YAML：`scheduler: {name: exponential, gamma: 0.9}`——除 `name` 外的每个键都作为选项透传；`total_steps` 由运行时消费，不会作为关键字传给构造器。省略 `scheduler` 小节即保持恒定学习率。
+
 ### 损失
 
 ```python
@@ -117,7 +139,7 @@ register_loss("huber", torch.nn.SmoothL1Loss, task="regression", validate=...)
 
 ## 一个完整的自定义实验
 
-可运行版本见 `examples/`：`custom_model.py`、`custom_dataset.py`、`custom_experiment.py`、`custom.yaml`（分类），以及 `regression_experiment.py` + `regression.yaml`（自定义数据集配内置 `mse` 损失与 `sgd` 优化器）。入口脚本就是全部故事：
+可运行版本见 `examples/`：`custom_model.py`、`custom_dataset.py`、`custom_scheduler.py`、`custom_experiment.py`、`custom.yaml`（分类），以及 `regression_experiment.py` + `regression.yaml`（自定义数据集配内置 `mse` 损失与 `sgd` 优化器）。入口脚本就是全部故事：
 
 ```python
 from pathlib import Path
@@ -176,7 +198,27 @@ class EpochTimeCallback(Callback):
 run_from_file(CONFIG, command="python my_experiment.py", extra_callbacks=[EpochTimeCallback()])
 ```
 
-各钩子都会收到 trainer——`on_train_start`、`on_epoch_start`、`on_batch_start`、`on_batch_end`、`on_epoch_end`、`on_train_end`、`on_exception`——callback 因此能在每个边界读到模型、优化器与 `TrainerState`。注入的 callback 在每个事件中先于指标记录之后、checkpoint 之前执行。callback 是观察者：不能中断训练（早停等控制流钩子是未来的扩展）。
+各钩子都会收到 trainer——`on_train_start`、`on_epoch_start`、`on_batch_start`、`on_batch_end`、`on_epoch_end`、`on_train_end`、`on_exception`——callback 因此能在每个边界读到模型、优化器与 `TrainerState`。注入的 callback 在每个事件中于指标记录之后、checkpoint 之前执行。
+
+callback 还可以通过 `trainer.request_stop(reason)` 协作式地结束运行。任何钩子都可以发起请求，而它一律在 epoch 边界生效：当前 epoch 照常完成——包括 checkpoint 落盘——随后运行以 `finished` 状态结束，原因记录在 `state.stop_reason` 中：
+
+```python
+from trainlattice import Callback
+
+
+class TargetLossCallback(Callback):
+    """一旦该 epoch 的训练损失达标即请求停止。"""
+
+    def __init__(self, target: float) -> None:
+        self.target = target
+
+    def on_epoch_end(self, trainer):
+        loss = trainer.state.latest_metrics.get("train_loss")
+        if loss is not None and loss <= self.target:
+            trainer.request_stop(f"train_loss {loss:.4f} 已达目标 {self.target}")
+```
+
+内置早停（`trainer.early_stopping`）走的正是同一机制——它在 epoch 指标写入之后、epoch 末回调之前发起停止请求。
 
 ## 校验与错误消息
 
@@ -191,13 +233,14 @@ run_from_file(CONFIG, command="python my_experiment.py", extra_callbacks=[EpochT
 | 结构化形状不匹配 | `model.input_shape ([3, 4, 4]) must match dataset.input_shape ([4])` |
 | 输出宽度不匹配 | `model.num_classes (3) must match dataset.num_classes (2)` |
 | monitor 与任务不匹配 | `trainer.monitor 'val_accuracy' requires a classification loss; loss.name 'mse' is regression` |
+| 早停选项非法 | `trainer.early_stopping.patience must be at least 1` |
 
 注册重名会立即报错（`architecture 'mlp' is already registered`），因此内置组件不可被覆盖。不声明 `validate` 时，未知选项会以构造错误而非点分路径消息出现；不声明 `contract` 时，该组件跳过其侧的形状比对。建议两者都声明。
 
 ## 兼容性注意
 
 - **pickle**：`num_workers > 0` 时，Windows 与 macOS 上的 worker 进程按 spawn 方式启动——闭包或 lambda 构造的数据集会在这些平台失败。调试自定义数据集时可先用 `num_workers: 0`。
-- **恢复**：影响恢复语义的配置必须与 checkpoint 一致，包括 loss 小节、优化器名与全部组件选项。恢复运行会重新 import 你的组件模块并重建相同组件；若两次运行之间修改了组件代码，恢复风险自负——比对只针对配置，不针对源码。
+- **恢复**：影响恢复语义的配置必须与 checkpoint 一致，包括 loss 与 scheduler 小节、优化器名与全部组件选项。恢复运行会重新 import 你的组件模块并重建相同组件；若两次运行之间修改了组件代码，恢复风险自负——比对只针对配置，不针对源码。
 - **复现**：运行 manifest 记录各组件代码所在位置，但实验脚本本身也是复现入口的一部分——请与运行目录一并归档。
 
 ## 为什么这样设计

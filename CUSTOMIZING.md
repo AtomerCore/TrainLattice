@@ -2,17 +2,18 @@
 
 English | [简体中文](CUSTOMIZING.zh-CN.md)
 
-Everything the runtime builds is a registered component. Architectures, datasets, optimizers, and losses all live in registries, and any Python module that imports TrainLattice and calls `register` extends them — there is no plugin loading mechanism, no entry-point discovery, and no configuration for registration itself. This document is the complete reference for writing your own components.
+Everything the runtime builds is a registered component. Architectures, datasets, optimizers, learning-rate schedulers, and losses all live in registries, and any Python module that imports TrainLattice and calls `register` extends them — there is no plugin loading mechanism, no entry-point discovery, and no configuration for registration itself. This document is the complete reference for writing your own components.
 
 ## The Model
 
-Four registries are the extension points, exported from the package root:
+Five registries are the extension points, exported from the package root:
 
 | Registry | Builds | Built-ins | Constructor signature |
 |---|---|---|---|
 | `ARCHITECTURES` | models | `mlp`, `cnn` | `(*, **options) -> nn.Module` |
 | `DATASETS` | datasets | `synthetic`, `tensor` | `(*, train, split=None, **options) -> Dataset` |
 | `OPTIMIZERS` | optimizers | `adamw`, `adam`, `sgd` | `(params, lr=..., **options) -> Optimizer` |
+| `SCHEDULERS` | learning-rate schedulers | `warmup_cosine`, `warmup_linear`, `step_decay` | `(optimizer, total_steps, **options) -> LRScheduler` |
 | `LOSSES` | losses | `cross_entropy`, `mse`, `l1` | `(**options) -> nn.Module`, via `register_loss` |
 
 Importing a module is what registers its components. Your experiment script imports the component modules, then starts the run through `run_experiment` or `run_from_file`; the YAML configuration only names the components. The same registration calls the built-ins use are the ones you call — custom components get identical validation, contract comparison, checkpointing, and resume semantics.
@@ -99,6 +100,27 @@ Conventions:
 - YAML: `optimizer: {name: rmsprop, lr: 0.001, alpha: 0.99}` — every key except `name` and `lr` is passed through as an option.
 - There is no contract declaration for optimizers; `validate` is the only optional declaration.
 
+### Schedulers
+
+```python
+from torch.optim.lr_scheduler import ExponentialLR
+
+from trainlattice import SCHEDULERS
+
+
+def build_exponential(optimizer, _total_steps, *, gamma=0.9):
+    return ExponentialLR(optimizer, gamma=gamma)
+
+
+SCHEDULERS.register("exponential", build_exponential, validate=...)
+```
+
+Conventions:
+
+- The constructor receives the optimizer **positionally**, then the resolved `total_steps` integer (the scheduler option wins over the value derived from the run: optimizer steps per epoch — `ceil(batches per epoch / trainer.accumulate)` — × `trainer.epochs`), then the YAML options as keywords: `constructor(optimizer, total_steps, **options)`. Schedulers that do not span a step budget ignore the second argument, and their `validate` rejects `total_steps` as an unknown option.
+- The trainer steps the scheduler once per optimizer step that applies an update, and checkpoint format v4 persists the scheduler state with its resolved step budget, so a resume keeps the schedule the run started with; a checkpoint saved without a scheduler resumes without one.
+- YAML: `scheduler: {name: exponential, gamma: 0.9}` — every key except `name` is passed through as an option; `total_steps` is consumed by the runtime and never reaches the constructor as a keyword. Omitting the `scheduler` section keeps a constant learning rate.
+
 ### Losses
 
 ```python
@@ -117,7 +139,7 @@ Conventions:
 
 ## A Complete Custom Experiment
 
-See `examples/` for runnable versions: `custom_model.py`, `custom_dataset.py`, `custom_experiment.py`, `custom.yaml` (classification), and `regression_experiment.py` + `regression.yaml` (a custom dataset with the built-in `mse` loss and `sgd` optimizer). The entry script is the whole story:
+See `examples/` for runnable versions: `custom_model.py`, `custom_dataset.py`, `custom_scheduler.py`, `custom_experiment.py`, `custom.yaml` (classification), and `regression_experiment.py` + `regression.yaml` (a custom dataset with the built-in `mse` loss and `sgd` optimizer). The entry script is the whole story:
 
 ```python
 from pathlib import Path
@@ -176,7 +198,27 @@ class EpochTimeCallback(Callback):
 run_from_file(CONFIG, command="python my_experiment.py", extra_callbacks=[EpochTimeCallback()])
 ```
 
-Hooks receive the trainer — `on_train_start`, `on_epoch_start`, `on_batch_start`, `on_batch_end`, `on_epoch_end`, `on_train_end`, `on_exception` — so a callback can read the model, optimizer, and `TrainerState` at every boundary. Injected callbacks run after metric logging and before checkpointing within each event. Callbacks are observers: they cannot interrupt training (control-flow hooks such as early stopping are a future extension).
+Hooks receive the trainer — `on_train_start`, `on_epoch_start`, `on_batch_start`, `on_batch_end`, `on_epoch_end`, `on_train_end`, `on_exception` — so a callback can read the model, optimizer, and `TrainerState` at every boundary. Injected callbacks run after metric logging and before checkpointing within each event.
+
+A callback can also end the run cooperatively through `trainer.request_stop(reason)`. Any hook may make the request, and it always takes effect at the epoch boundary: the current epoch finishes — including its checkpoint save — and the run then completes with status `finished`, with the reason recorded in `state.stop_reason`:
+
+```python
+from trainlattice import Callback
+
+
+class TargetLossCallback(Callback):
+    """Stop once the epoch's training loss reaches the target."""
+
+    def __init__(self, target: float) -> None:
+        self.target = target
+
+    def on_epoch_end(self, trainer):
+        loss = trainer.state.latest_metrics.get("train_loss")
+        if loss is not None and loss <= self.target:
+            trainer.request_stop(f"train_loss {loss:.4f} reached target {self.target}")
+```
+
+The built-in early stopping (`trainer.early_stopping`) ends the run through the same mechanism — it requests the stop after the epoch's metrics are recorded and before the epoch-end callbacks run.
 
 ## Validation and Error Messages
 
@@ -191,13 +233,14 @@ All failures below happen before a run directory is created:
 | Structured-shape mismatch | `model.input_shape ([3, 4, 4]) must match dataset.input_shape ([4])` |
 | Output-width mismatch | `model.num_classes (3) must match dataset.num_classes (2)` |
 | Monitor/task mismatch | `trainer.monitor 'val_accuracy' requires a classification loss; loss.name 'mse' is regression` |
+| Invalid early-stopping option | `trainer.early_stopping.patience must be at least 1` |
 
 Registering an already-registered name raises immediately (`architecture 'mlp' is already registered`), so built-ins cannot be shadowed. Without a `validate` declaration, unknown options surface as construction errors instead of dotted-path messages; without a `contract`, that component skips its side of the shape comparison. Declaring both is recommended.
 
 ## Compatibility Notes
 
 - **Pickling**: with `num_workers > 0`, worker processes are spawned (not forked) on Windows and macOS — closure- or lambda-built datasets fail there. Use `num_workers: 0` while iterating on a custom dataset.
-- **Resume**: recovery-sensitive configuration must match the checkpoint, which includes the loss section, the optimizer name, and all component options. A resumed run re-imports your component modules and rebuilds identical components; if you change component code between runs, resume from the changed code at your own risk — only the configuration is compared, not the source.
+- **Resume**: recovery-sensitive configuration must match the checkpoint, which includes the loss and scheduler sections, the optimizer name, and all component options. A resumed run re-imports your component modules and rebuilds identical components; if you change component code between runs, resume from the changed code at your own risk — only the configuration is compared, not the source.
 - **Reproduction**: the run manifest records where each component's code lives, but the experiment script itself is part of the reproduction entry — archive it alongside the run directory.
 
 ## Why It Is Designed This Way
