@@ -17,8 +17,13 @@ from .sources import PluginRequest
 
 def read_yaml(path: Path) -> dict[str, Any]:
     """Read a YAML mapping with a source-specific error."""
+    if path.is_dir():
+        raise ConfigError(f"{path}: configuration path is a directory, not a file")
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        if not text.strip():
+            raise ConfigError(f"{path}: configuration file is empty")
+        raw = yaml.safe_load(text)
     except (OSError, yaml.YAMLError) as exc:
         raise ConfigError(f"{path}: {exc}") from exc
     if not isinstance(raw, dict) or any(not isinstance(key, str) for key in raw):

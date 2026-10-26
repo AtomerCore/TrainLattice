@@ -30,8 +30,12 @@ class Counter:
 def make_store(tmp_path, providers=None):
     app = build_application({"profile": "supervised-basic"})
     with app:
+        document = app.snapshot.to_dict()
+        document["plugins"].extend({"id": key, "version": "1", "api_version": 1,
+                                    "fingerprint": "counter", "state_mode": "stateful", "services": [],
+                                    "bindings": {}, "config": {}} for key in (providers or {}))
         return app.require("trainlattice.checkpoint/local").create(
-            tmp_path / "checkpoints", snapshot=app.snapshot, state_providers=providers or {})
+            tmp_path / "checkpoints", snapshot=PluginSnapshot(document), state_providers=providers or {})
 
 
 def objects():

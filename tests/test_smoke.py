@@ -14,15 +14,16 @@ def test_module_cli_from_repository_root() -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr
     assert "train" in result.stdout
 
 
-@pytest.mark.parametrize("module", ["checkpoint", "trainer", "callbacks"])
+@pytest.mark.parametrize("module", ["kernel", "application", "contracts.callbacks"])
 def test_core_packages_import_independently(module: str) -> None:
     result = subprocess.run(
         [sys.executable, "-c", f"import trainlattice.{module}"],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, timeout=30,
     )
     assert result.returncode == 0, result.stderr

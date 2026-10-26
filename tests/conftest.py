@@ -30,33 +30,3 @@ def _small_training_workloads():
     torch = sys.modules.get("torch")
     if torch is not None:
         torch.set_num_threads(1)
-
-
-@pytest.fixture(autouse=True)
-def _isolate_component_registries(request):
-    """Restore the shared component registries after tests that extend them."""
-    if request.node.path.parent.name == "kernel":
-        yield
-        return
-    try:
-        from trainlattice.datasets import DATASETS
-        from trainlattice.modeling import ARCHITECTURES
-        from trainlattice.optim import OPTIMIZERS, SCHEDULERS
-        from trainlattice.trainer.losses import LOSS_TASKS, LOSSES
-    except Exception:
-        yield
-        return
-    saved = {
-        DATASETS: dict(DATASETS._items),
-        ARCHITECTURES: dict(ARCHITECTURES._items),
-        OPTIMIZERS: dict(OPTIMIZERS._items),
-        SCHEDULERS: dict(SCHEDULERS._items),
-        LOSSES: dict(LOSSES._items),
-    }
-    saved_tasks = dict(LOSS_TASKS)
-    yield
-    for registry, items in saved.items():
-        registry._items.clear()
-        registry._items.update(items)
-    LOSS_TASKS.clear()
-    LOSS_TASKS.update(saved_tasks)

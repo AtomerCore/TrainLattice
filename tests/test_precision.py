@@ -11,20 +11,14 @@ torch = pytest.importorskip("torch")
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from trainlattice.callbacks import CheckpointCallback
-from trainlattice.checkpoint import CheckpointManager
-from trainlattice.config.schema import (
-    DatasetConfig,
-    ExperimentConfig,
-    ExperimentSection,
-    ModelConfig,
-    OptimizerConfig,
-    TrainerConfig,
-)
+from trainlattice.builtin_plugins.callbacks_basic.callbacks import CheckpointCallback
+from helpers import CheckpointManager
+from trainlattice.contracts.config import DatasetConfig, ExperimentConfig, ExperimentSection, ModelConfig, OptimizerConfig, TrainerConfig
 from trainlattice.errors import ConfigError, TrainLatticeError
-from trainlattice.runtime.runner import run_experiment
-from trainlattice.trainer import Trainer, TrainerState
-from trainlattice.trainer.trainer import GradScaler
+from helpers import run_experiment
+from helpers import Trainer
+from trainlattice.contracts.state import TrainerState
+from trainlattice.builtin_plugins.trainer_supervised.trainer import GradScaler
 
 
 def cpu_scaler() -> GradScaler:
@@ -233,7 +227,7 @@ def test_scaler_state_round_trips_through_checkpoints(tmp_path: Path) -> None:
     callback.on_epoch_end(trainer)
 
     payload = torch.load(manager.directory / "last.pt", weights_only=False)
-    assert payload["format_version"] == 4
+    assert payload["format_version"] == 5
     assert payload["scaler"]["growth_interval"] == 17
 
     restored = cpu_scaler()
@@ -241,11 +235,8 @@ def test_scaler_state_round_trips_through_checkpoints(tmp_path: Path) -> None:
     assert restored.state_dict()["growth_interval"] == 17
     assert restored.get_scale() == pytest.approx(initial_scale * 4)
 
-    # a checkpoint without scaler state leaves the resumed scaler at its initial scale
-    del payload["scaler"]
-    payload["format_version"] = 3
-    legacy = manager.directory / "v3.pt"
-    torch.save(payload, legacy)
-    fresh = cpu_scaler()
-    manager.load(legacy, model=model, optimizer=optimizer, scaler=fresh)
-    assert fresh.get_scale() == pytest.approx(initial_scale)
+    payload["scaler"] = None
+    incomplete = manager.directory / "incomplete.pt"
+    torch.save(payload, incomplete)
+    with pytest.raises(TrainLatticeError, match="missing scaler state"):
+        manager.load(incomplete, model=model, optimizer=optimizer, scaler=cpu_scaler())

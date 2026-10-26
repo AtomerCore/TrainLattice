@@ -2,13 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from trainlattice.config import (
-    ComponentContract,
-    ExperimentConfig,
-    compare_contracts,
-    configs_compatible,
-    load_config,
-)
+from trainlattice.contracts.components import ComponentContract, compare_contracts
+from trainlattice.contracts.config import ExperimentConfig
+from trainlattice.builtin_plugins.checkpoint_local.config import configs_compatible
+from helpers import load_config
 from trainlattice.errors import ConfigError
 
 
@@ -297,38 +294,8 @@ def test_recovery_comparison_allows_early_stopping_changes(tmp_path: Path) -> No
     assert not configs_compatible(strict, changed_monitor)
 
 
-def test_recovery_comparison_treats_absent_newer_fields_as_defaults() -> None:
-    legacy_checkpoint = {
-        "experiment": {"name": "unit", "seed": 42, "runs_dir": "runs"},
-        "model": {"name": "mlp", "input_dim": 4},
-        "dataset": {"name": "synthetic", "batch_size": 2, "num_workers": 0, "input_shape": [4]},
-        "optimizer": {"lr": 0.01},
-        "trainer": {"epochs": 2, "device": "cpu", "validate_every": 1, "log_every": 10},
-    }
-    expected = dict(legacy_checkpoint)
-    expected["trainer"] = {
-        **legacy_checkpoint["trainer"],
-        "monitor": "val_loss",
-        "max_grad_norm": None,
-        "accumulate": 1,
-    }
-    expected["optimizer"] = {"name": "adamw", "lr": 0.01}
-    expected["loss"] = {"name": "cross_entropy"}
-
-    assert configs_compatible(legacy_checkpoint, expected)
-
-    changed = dict(expected)
-    changed["trainer"] = {**expected["trainer"], "monitor": "val_accuracy"}
-    assert not configs_compatible(legacy_checkpoint, changed)
-    changed_loss = dict(expected)
-    changed_loss["loss"] = {"name": "mse"}
-    assert not configs_compatible(legacy_checkpoint, changed_loss)
-    nulled = dict(expected)
-    nulled["loss"] = None
-    assert configs_compatible(legacy_checkpoint, nulled)
-    with_early_stopping = dict(expected)
-    with_early_stopping["trainer"] = {
-        **expected["trainer"],
-        "early_stopping": {"patience": 2, "min_delta": 0.0},
-    }
-    assert configs_compatible(legacy_checkpoint, with_early_stopping)
+def test_recovery_comparison_requires_resolved_training_fields() -> None:
+    resolved = {"trainer": {"precision": "fp32", "accumulate": 1}, "loss": {"name": "cross_entropy"}}
+    assert configs_compatible(resolved, resolved)
+    assert not configs_compatible({}, resolved)
+    assert not configs_compatible(resolved, {**resolved, "loss": {"name": "mse"}})

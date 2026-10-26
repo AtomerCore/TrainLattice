@@ -33,7 +33,10 @@ def content_fingerprint(root: Path) -> str:
 
 def contracts_fingerprint() -> str:
     """Fingerprint shared domain contracts without importing training code."""
-    return content_fingerprint(Path(__file__).resolve().parents[1] / "contracts")
+    digest = hashlib.sha256()
+    digest.update(content_fingerprint(Path(__file__).resolve().parents[1] / "contracts").encode())
+    digest.update(Path(__file__).with_name("api.py").read_bytes())
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

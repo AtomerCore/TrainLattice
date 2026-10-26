@@ -12,7 +12,7 @@ from typing import Any
 
 from torch import nn
 
-from trainlattice.errors import ConfigError, RegistryError
+from trainlattice.errors import ConfigError
 
 
 

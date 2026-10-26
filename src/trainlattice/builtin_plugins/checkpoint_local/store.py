@@ -56,6 +56,9 @@ class CheckpointStore:
         self.directory = Path(directory)
         self.snapshot = snapshot
         self.state_providers = state_providers
+        declared = {item["id"] for item in snapshot.to_dict()["plugins"] if item["state_mode"] == "stateful"}
+        if declared != set(state_providers):
+            raise CheckpointError("checkpoint state providers do not match declared stateful plugins")
 
     def save(self, name: str, *, model: Any, optimizer: Any, trainer_state: TrainerState,
              config: dict[str, Any], resume_safe: bool = True,
@@ -96,7 +99,7 @@ class CheckpointStore:
             source = self.directory / source
         try:
             payload = torch.load(source, map_location="cpu", weights_only=True)
-            if not isinstance(payload, dict) or payload.get("format_version") != CHECKPOINT_FORMAT_VERSION:
+            if not isinstance(payload, dict) or type(payload.get("format_version")) is not int or payload["format_version"] != CHECKPOINT_FORMAT_VERSION:
                 raise CheckpointError("unsupported checkpoint format version; expected 5")
             if payload.get("resume_safe") is not True:
                 raise CheckpointError("checkpoint is a diagnostic emergency snapshot and cannot be resumed safely")
@@ -118,7 +121,7 @@ class CheckpointStore:
                 raise CheckpointError("checkpoint plugin state providers do not match the active graph")
             for key, provider in self.state_providers.items():
                 state = states[key]
-                if not isinstance(state, dict) or state.get("schema_version") != provider.state_schema_version:
+                if not isinstance(state, dict) or type(state.get("schema_version")) is not int or state["schema_version"] != provider.state_schema_version:
                     raise CheckpointError(f"checkpoint plugin state schema mismatch: {key}")
                 if not isinstance(state.get("payload"), dict):
                     raise CheckpointError(f"checkpoint missing plugin state payload: {key}")
@@ -142,15 +145,15 @@ class CheckpointStore:
                 scheduler: Any = None, scaler: Any = None) -> TrainerState:
         """Restore a preflighted payload, ordered plugin state, and finally RNG."""
         try:
+            if scheduler is not None and payload["scheduler"] is None:
+                raise CheckpointError("checkpoint missing scheduler state")
+            if scaler is not None and payload["scaler"] is None:
+                raise CheckpointError("checkpoint missing scaler state")
             model.load_state_dict(payload["model"])
             optimizer.load_state_dict(payload["optimizer"])
             if scheduler is not None:
-                if payload["scheduler"] is None:
-                    raise CheckpointError("checkpoint missing scheduler state")
                 scheduler.load_state_dict(payload["scheduler"])
             if scaler is not None:
-                if payload["scaler"] is None:
-                    raise CheckpointError("checkpoint missing scaler state")
                 scaler.load_state_dict(payload["scaler"])
             state = TrainerState.from_dict(payload["trainer_state"])
             for key, provider in self.state_providers.items():

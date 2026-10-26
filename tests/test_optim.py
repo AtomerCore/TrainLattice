@@ -61,7 +61,7 @@ def test_runs_end_to_end_with_sgd_and_records_source(tmp_path: Path) -> None:
         ModelConfig,
         TrainerConfig,
     )
-    from trainlattice.runtime.runner import run_experiment
+    from helpers import run_experiment
 
     config = ExperimentConfig(
         experiment=ExperimentSection(name="sgd-run", seed=3, runs_dir=str(tmp_path / "runs")),

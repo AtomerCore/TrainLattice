@@ -8,7 +8,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from trainlattice.trainer import Trainer
+from helpers import Trainer
 
 
 @pytest.mark.parametrize("training", [True, False])

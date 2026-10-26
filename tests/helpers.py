@@ -79,10 +79,13 @@ def native_mapping(config):
     return {"profile": "supervised-basic", "bindings": {"org.trainlattice.experiment.default": bindings}, **data}
 
 
-def run_experiment(config, *, command="pytest", resume=None, extra_callbacks=()):
+def run_experiment(config, *, command="pytest", resume=None, extra_callbacks=(), plugins=()):
     """Execute typed domain fixtures using the native public Python entry."""
     from trainlattice.application import run_experiment as execute
-    return execute(native_mapping(config), command=command, resume=resume, callbacks=extra_callbacks)
+    raw = native_mapping(config)
+    if plugins:
+        raw["plugins"] = list(plugins)
+    return execute(raw, command=command, resume=resume, callbacks=extra_callbacks)
 
 
 def Trainer(**options):
@@ -101,6 +104,6 @@ def CheckpointManager(directory):
 
 def load_config(path):
     """Parse typed domain fixture options independently of bootstrap selection."""
-    import yaml
     from trainlattice.contracts.config import ExperimentConfig
-    return ExperimentConfig.from_dict(yaml.safe_load(path.read_text(encoding="utf-8")))
+    from trainlattice.kernel.bootstrap import read_yaml
+    return ExperimentConfig.from_dict(read_yaml(path))

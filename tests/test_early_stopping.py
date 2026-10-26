@@ -6,19 +6,13 @@ torch = pytest.importorskip("torch")
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from trainlattice.callbacks import Callback, CheckpointCallback
-from trainlattice.checkpoint import CheckpointManager
-from trainlattice.config.schema import (
-    DatasetConfig,
-    EarlyStoppingConfig,
-    ExperimentConfig,
-    ExperimentSection,
-    ModelConfig,
-    OptimizerConfig,
-    TrainerConfig,
-)
-from trainlattice.runtime.runner import run_experiment
-from trainlattice.trainer import Trainer, TrainerState
+from trainlattice.contracts.callbacks import Callback
+from trainlattice.builtin_plugins.callbacks_basic.callbacks import CheckpointCallback
+from helpers import CheckpointManager
+from trainlattice.contracts.config import DatasetConfig, EarlyStoppingConfig, ExperimentConfig, ExperimentSection, ModelConfig, OptimizerConfig, TrainerConfig
+from helpers import run_experiment
+from helpers import Trainer
+from trainlattice.contracts.state import TrainerState
 
 
 class BiasSchedule(Callback):
@@ -258,7 +252,8 @@ def test_stop_reason_round_trips_through_state_serialization() -> None:
     assert state.to_dict()["stop_reason"] == "early stopping: val_loss plateaued"
     assert TrainerState.from_dict(state.to_dict()).stop_reason == state.stop_reason
     # checkpoints saved before early stopping carry no stop_reason key
-    assert TrainerState.from_dict({"epoch": 3}).stop_reason is None
+    with pytest.raises(ValueError, match="trainer state fields"):
+        TrainerState.from_dict({"epoch": 3})
 
 
 def test_trainer_rejects_unsupported_monitor(tmp_path: Path) -> None:
@@ -282,7 +277,7 @@ def test_early_stopping_warns_when_no_callback_advances_the_best_metric(
         early_stopping=EarlyStoppingConfig(patience=1),
     )
 
-    with caplog.at_level("WARNING", logger="trainlattice.trainer.trainer"):
+    with caplog.at_level("WARNING", logger="trainlattice.plugins.trainer.supervised"):
         state = trainer.fit(*make_loaders(0))
 
     assert state.status == "finished"

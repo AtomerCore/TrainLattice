@@ -9,20 +9,14 @@ torch = pytest.importorskip("torch")
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from trainlattice.callbacks import Callback
-from trainlattice.checkpoint import CheckpointManager
+from trainlattice.contracts.callbacks import Callback
+from helpers import CheckpointManager
 from trainlattice.cli.main import CLI_HANDLER_ATTR, _configure_logging, main
-from trainlattice.config.schema import (
-    DatasetConfig,
-    ExperimentConfig,
-    ExperimentSection,
-    ModelConfig,
-    OptimizerConfig,
-    TrainerConfig,
-)
-from trainlattice.logging.loggers import ConsoleLogger
-from trainlattice.runtime.runner import run_experiment
-from trainlattice.trainer import Trainer, TrainerState
+from trainlattice.contracts.config import DatasetConfig, ExperimentConfig, ExperimentSection, ModelConfig, OptimizerConfig, TrainerConfig
+from trainlattice.builtin_plugins.logging_basic.loggers import ConsoleLogger
+from helpers import run_experiment
+from helpers import Trainer
+from trainlattice.contracts.state import TrainerState
 
 
 def tiny_config(tmp_path: Path, epochs: int = 1) -> ExperimentConfig:
@@ -51,7 +45,7 @@ def test_run_directory_creation_is_logged(tmp_path: Path, caplog: pytest.LogCapt
         result = run_experiment(tiny_config(tmp_path), command="pytest diagnostics")
 
     record = next(r for r in caplog.records if "run directory" in r.getMessage())
-    assert record.name == "trainlattice.runtime.runner"
+    assert record.name == "trainlattice.plugins.experiment.default"
     assert record.levelno == logging.INFO
     assert str(result.run_dir) in record.getMessage()
 
@@ -63,7 +57,7 @@ def test_checkpoint_resume_logs_source_and_next_epoch(tmp_path: Path, caplog: py
         run_experiment(tiny_config(tmp_path, epochs=2), command="pytest resume", resume=first.run_dir)
 
     record = next(r for r in caplog.records if "next epoch" in r.getMessage())
-    assert record.name == "trainlattice.runtime.runner"
+    assert record.name == "trainlattice.plugins.experiment.default"
     assert record.levelno == logging.INFO
     assert str(first.run_dir / "checkpoints" / "last.pt") in record.getMessage()
     assert f"next epoch {first.state.next_epoch}" in record.getMessage()
@@ -85,8 +79,8 @@ def test_checkpoint_manager_logs_save_and_load(tmp_path: Path, caplog: pytest.Lo
         manager.load(target, model=model, optimizer=optimizer)
 
     messages = [(r.name, r.levelno, r.getMessage()) for r in caplog.records]
-    assert ("trainlattice.checkpoint.manager", logging.INFO, f"checkpoint saved to {target}") in messages
-    assert ("trainlattice.checkpoint.manager", logging.INFO, f"checkpoint restored from {target}") in messages
+    assert ("trainlattice.plugins.checkpoint.local", logging.INFO, f"checkpoint saved to {target}") in messages
+    assert ("trainlattice.plugins.checkpoint.local", logging.INFO, f"checkpoint restored from {target}") in messages
 
 
 class FailEveryCallback(Callback):
@@ -112,7 +106,7 @@ def test_callback_exception_during_failure_logs_warning(caplog: pytest.LogCaptur
         with pytest.raises(RuntimeError, match="simulated interruption"):
             trainer.fit(loader())
 
-    record = next(r for r in caplog.records if r.name == "trainlattice.trainer.trainer")
+    record = next(r for r in caplog.records if r.name == "trainlattice.plugins.trainer.supervised")
     assert record.levelno == logging.WARNING
     message = record.getMessage()
     assert "FailEveryCallback" in message
@@ -126,7 +120,7 @@ def test_cli_error_exits_2_through_error_channel(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     config = tmp_path / "invalid.yaml"
-    config.write_text("trainr:\n  epochs: 2\n", encoding="utf-8")
+    config.write_text("profile: supervised-basic\ntrainr:\n  epochs: 2\n", encoding="utf-8")
 
     with caplog.at_level(logging.INFO, logger="trainlattice"):
         assert main(["train", str(config)]) == 2
@@ -141,12 +135,11 @@ def test_cli_error_exits_2_through_error_channel(
 
 
 DEVICE_CONFIG = """
+profile: supervised-basic
 experiment:
   name: device-test
 model:
-  name: mlp
 dataset:
-  name: synthetic
 trainer:
   device: tpu
 """
@@ -177,7 +170,7 @@ def test_cli_translates_runtime_failures_with_exit_code_2(
     def explode(path, *, resume=None, command="trainlattice train"):
         raise RuntimeError("simulated runtime failure")
 
-    monkeypatch.setattr("trainlattice.cli.main.run_from_file", explode)
+    monkeypatch.setattr("trainlattice.application.run_from_file", explode)
 
     assert main(["train", str(config)]) == 2
 
