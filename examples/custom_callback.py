@@ -1,4 +1,4 @@
-"""Custom callback registered into an experiment's lifecycle.
+"""Custom observer passed to a native experiment lifecycle.
 
 Callbacks observe the trainer through the ``Callback`` hooks and extend
 the run between the built-in logging and checkpointing callbacks; any
@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from trainlattice import Callback
-from trainlattice.trainer.trainer import Trainer
+from trainlattice.contracts.callbacks import Callback
+from trainlattice.contracts.training import TrainerView as Trainer
 
 
 class EpochTimeCallback(Callback):

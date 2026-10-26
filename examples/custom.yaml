@@ -1,27 +1,36 @@
+profile: supervised-basic
+plugins:
+- source: plugins/training_extensions
+  config:
+    metric_scale: 1.0
+bindings:
+  org.trainlattice.experiment.default:
+    model: example.model/linear
+    optimizer: example.optimizer/momentum_sgd
+    scheduler: example.scheduler/exponential
+    callbacks: example.callbacks/counted
+  org.trainlattice.trainer.supervised:
+    metrics: example.metrics/predictions
 experiment:
-  name: two-blobs-logistic
+  name: local-plugins
   seed: 7
   runs_dir: runs
-
 model:
-  name: logistic
-  input_dim: 2
+  input_dim: 4
   num_classes: 2
-
 dataset:
-  name: two_blobs
-  batch_size: 16
-  num_workers: 0
-  input_dim: 2
-  samples: 128
-  val_samples: 32
-  noise: 0.4
-
+  batch_size: 4
+  samples: 16
+  val_samples: 8
+  input_shape:
+  - 4
+  num_classes: 2
 optimizer:
   lr: 0.05
-
+  momentum: 0.9
+scheduler:
+  gamma: 0.9
 trainer:
   epochs: 2
   device: cpu
-  validate_every: 1
-  log_every: 4
+  log_every: 1

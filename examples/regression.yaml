@@ -1,31 +1,36 @@
+profile: supervised-basic
+plugins:
+- source: plugins/training_extensions
+  config:
+    metric_scale: 1.0
+bindings:
+  org.trainlattice.experiment.default:
+    model: example.model/linear
+    optimizer: example.optimizer/momentum_sgd
+    scheduler: example.scheduler/exponential
+    callbacks: example.callbacks/counted
+    dataset: example.dataset/sine
+    loss: trainlattice.loss/mse
+  org.trainlattice.trainer.supervised:
+    metrics: example.metrics/predictions
 experiment:
-  name: sine-wave-regression
-  seed: 11
+  name: sine-regression
+  seed: 7
   runs_dir: runs
-
 model:
-  name: mlp
   input_dim: 1
-  hidden_dims: [32, 16]
   num_classes: 1
-
 dataset:
-  name: sine_wave
-  batch_size: 16
-  num_workers: 0
-  samples: 128
-  val_samples: 32
-
+  batch_size: 4
+  samples: 16
+  val_samples: 8
 optimizer:
-  name: sgd
   lr: 0.05
   momentum: 0.9
-
-loss:
-  name: mse
-
+scheduler:
+  gamma: 0.9
 trainer:
-  epochs: 20
+  epochs: 2
   device: cpu
-  validate_every: 1
-  log_every: 8
+  log_every: 1
+loss: {}

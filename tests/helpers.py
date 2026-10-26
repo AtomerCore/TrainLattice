@@ -1,8 +1,10 @@
 """Small test adapters that consume native plugin services."""
 
 from trainlattice.application import build_application
+from functools import cache
 
 
+@cache
 def get_component(category, name):
     """Resolve a component from the current native built-in composition."""
     with build_application({"profile": "supervised-basic"}) as app:
@@ -91,8 +93,14 @@ def run_experiment(config, *, command="pytest", resume=None, extra_callbacks=(),
 def Trainer(**options):
     """Assemble a trainer unit fixture with the native metrics collaborator."""
     from trainlattice.builtin_plugins.trainer_supervised.trainer import Trainer as NativeTrainer
+    return NativeTrainer(metrics_factory=metric_factory(), **options)
+
+
+@cache
+def metric_factory():
+    """Reuse the immutable built-in metric factory for small trainer fixtures."""
     with build_application({"profile": "supervised-basic"}) as app:
-        return NativeTrainer(metrics_factory=app.require("trainlattice.metrics/basic"), **options)
+        return app.require("trainlattice.metrics/basic")
 
 
 def CheckpointManager(directory):

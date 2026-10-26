@@ -1,0 +1,15 @@
+schema_version: 1
+id: example.training.audit
+version: 1.0.0
+api_version: 1
+entry: plugin.py:activate
+provides:
+  - service: example.trainer/audited
+  - service: example.checkpoint/audited
+requires:
+  trainer:
+    service: trainlattice.trainer/supervised
+  checkpoint:
+    service: trainlattice.checkpoint/local
+state:
+  mode: stateful
