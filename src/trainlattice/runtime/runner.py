@@ -7,15 +7,18 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from torch.utils.data import DataLoader
 
 from trainlattice.callbacks import Callback, CheckpointCallback, LoggingCallback
-from trainlattice.checkpoint import CheckpointManager
+from trainlattice.checkpoint import CheckpointManager, read_scheduler_budget
 from trainlattice.config import ExperimentConfig, compare_contracts, load_config
 from trainlattice.datasets import DATASETS, build_dataloaders, validate_dataset_config
 from trainlattice.errors import ConfigError, TrainLatticeError
 from trainlattice.logging import CompositeLogger, ConsoleLogger, JSONLLogger
 from trainlattice.modeling import ARCHITECTURES, build_model, validate_model_config
-from trainlattice.optim import OPTIMIZERS, build_optimizer, validate_optimizer_config
+from trainlattice.optim import OPTIMIZERS, build_optimizer, build_scheduler, validate_optimizer_config, validate_scheduler_config
 from trainlattice.runtime.device import select_device
 from trainlattice.runtime.experiment import RunContext
 from trainlattice.runtime.seed import seed_everything
@@ -76,6 +79,16 @@ def _check_monitor_matches_task(config: ExperimentConfig) -> None:
         )
 
 
+def _scheduler_total_steps(epochs: int, train_loader: DataLoader[Any], accumulate: int = 1) -> int:
+    """Derive the optimizer-step budget a scheduler spans across the run.
+
+    One optimizer step consumes ``accumulate`` micro-batches, so each epoch
+    contributes ``ceil(len(train_loader) / accumulate)`` steps.
+    """
+    steps_per_epoch = (len(train_loader) + accumulate - 1) // accumulate
+    return steps_per_epoch * epochs
+
+
 def _constructor_source(constructor: Callable) -> str:
     """Locate the module that defined a registered constructor."""
     module = getattr(constructor, "__module__", None) or type(constructor).__module__
@@ -96,8 +109,8 @@ def run_experiment(
     """Build and execute one configured experiment.
 
     ``extra_callbacks`` extend the lifecycle between the built-in logging
-    and checkpointing callbacks; they observe the trainer and cannot
-    interrupt it.
+    and checkpointing callbacks; they observe the trainer and may end the
+    run cooperatively through ``Trainer.request_stop``.
     """
     config.validate()
     seed_everything(config.experiment.seed)
@@ -108,6 +121,8 @@ def run_experiment(
     validate_dataset_config(config.dataset)
     validate_optimizer_config(config.optimizer)
     validate_loss_config(config.loss)
+    if config.scheduler is not None:
+        validate_scheduler_config(config.scheduler)
     _check_monitor_matches_task(config)
     _check_contracts(config)
     device = select_device(config.trainer.device)
@@ -115,6 +130,26 @@ def run_experiment(
     optimizer = build_optimizer(config.optimizer, model.parameters())
     loss_fn = build_loss(config.loss)
     loaders = build_dataloaders(config.dataset, seed=config.experiment.seed)
+    scheduler = None
+    scheduler_budget = None
+    if config.scheduler is not None:
+        budget = config.scheduler.options.get(
+            "total_steps",
+            _scheduler_total_steps(config.trainer.epochs, loaders.train, config.trainer.accumulate),
+        )
+        if explicit_source is not None and "total_steps" not in config.scheduler.options:
+            checkpoint_budget = read_scheduler_budget(explicit_source)
+            if checkpoint_budget is not None and checkpoint_budget != budget:
+                # the run keeps the schedule it started with, not the one the
+                # requested epochs would derive now
+                logger.info(
+                    "scheduler budget anchored to %d checkpointed steps (derived %d from the requested epochs)",
+                    checkpoint_budget,
+                    budget,
+                )
+                budget = checkpoint_budget
+        scheduler = build_scheduler(config.scheduler, optimizer, total_steps=budget)
+        scheduler_budget = budget
     context = RunContext.create(
         config,
         command=command,
@@ -136,23 +171,14 @@ def run_experiment(
         *(extra_callbacks or ()),
     ]
     callbacks.append(
-        CheckpointCallback(manager, config.to_dict(), monitor=config.trainer.monitor)
+        CheckpointCallback(
+            manager,
+            config.to_dict(),
+            monitor=config.trainer.monitor,
+            scheduler_budget=scheduler_budget,
+        )
     )
-    if resume is not None:
-        try:
-            state = manager.load(
-                source,
-                model=model,
-                optimizer=optimizer,
-                map_location=device,
-                expected_config=config.to_dict(),
-            )
-        except BaseException as exc:
-            logger.error("marking run manifest failed after checkpoint restore error: %s", exc)
-            metric_logger.close()
-            context.update(status="failed", finished_at=utc_now())
-            raise
-        logger.info("resumed from checkpoint %s; next epoch %d", source, state.next_epoch)
+    # built before the restore so its scaler participates in the checkpoint load
     trainer = Trainer(
         model=model,
         optimizer=optimizer,
@@ -163,8 +189,31 @@ def run_experiment(
         validate_every=config.trainer.validate_every,
         max_grad_norm=config.trainer.max_grad_norm,
         state=state,
+        scheduler=scheduler,
+        accumulate=config.trainer.accumulate,
+        precision=config.trainer.precision,
         task=loss_task(config.loss.name),
+        monitor=config.trainer.monitor,
+        early_stopping=config.trainer.early_stopping,
     )
+    if resume is not None:
+        try:
+            state = manager.load(
+                source,
+                model=model,
+                optimizer=optimizer,
+                map_location=device,
+                expected_config=config.to_dict(),
+                scheduler=scheduler,
+                scaler=trainer.scaler,
+            )
+            trainer.state = state
+        except BaseException as exc:
+            logger.error("marking run manifest failed after checkpoint restore error: %s", exc)
+            metric_logger.close()
+            context.update(status="failed", finished_at=utc_now())
+            raise
+        logger.info("resumed from checkpoint %s; next epoch %d", source, state.next_epoch)
     state.started_at = state.started_at or utc_now()
     context.update(status="running", started_at=state.started_at, resume_source=str(source) if source else None)
     try:

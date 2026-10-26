@@ -2,7 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from trainlattice.config import ComponentContract, compare_contracts, configs_compatible, load_config
+from trainlattice.config import (
+    ComponentContract,
+    ExperimentConfig,
+    compare_contracts,
+    configs_compatible,
+    load_config,
+)
 from trainlattice.errors import ConfigError
 
 
@@ -38,6 +44,7 @@ def test_loads_yaml_into_typed_sections(tmp_path: Path) -> None:
     assert config.dataset.name == "synthetic"
     assert config.optimizer.lr == 0.01
     assert config.trainer.epochs == 2
+    assert config.trainer.accumulate == 1
 
 
 def test_rejects_invalid_batch_size(tmp_path: Path) -> None:
@@ -91,6 +98,15 @@ def test_rejects_invalid_scalar_types(tmp_path: Path) -> None:
 def test_rejects_device_outside_supported_domain(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="trainer.device must be one of"):
         load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  device: tpu")))
+
+
+def test_rejects_invalid_accumulate(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="trainer.accumulate must be an integer"):
+        load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  accumulate: 1.5")))
+    with pytest.raises(ConfigError, match="trainer.accumulate must be an integer"):
+        load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  accumulate: true")))
+    with pytest.raises(ConfigError, match="trainer.accumulate must be at least 1"):
+        load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  accumulate: 0")))
 
 
 def test_rejects_invalid_monitor_and_grad_norm(tmp_path: Path) -> None:
@@ -198,6 +214,89 @@ def test_recovery_comparison_allows_runtime_only_changes(tmp_path: Path) -> None
     assert not configs_compatible(first, changed_lr)
 
 
+def test_loads_nested_early_stopping_section(tmp_path: Path) -> None:
+    config = load_config(
+        write_config(
+            tmp_path,
+            BASE_CONFIG.replace(
+                "epochs: 2",
+                "epochs: 2\n  early_stopping:\n    patience: 3\n    min_delta: 0.05",
+            ),
+        )
+    )
+
+    assert config.trainer.early_stopping is not None
+    assert config.trainer.early_stopping.patience == 3
+    assert config.trainer.early_stopping.min_delta == 0.05
+    assert config.to_dict()["trainer"]["early_stopping"] == {"patience": 3, "min_delta": 0.05}
+    assert ExperimentConfig.from_dict(config.to_dict()) == config
+
+    defaulted = load_config(
+        write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping:\n    patience: 2"))
+    )
+    assert defaulted.trainer.early_stopping is not None
+    assert defaulted.trainer.early_stopping.min_delta == 0.0
+
+    disabled = load_config(
+        write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping: null"))
+    )
+    assert disabled.trainer.early_stopping is None
+
+
+def test_rejects_invalid_early_stopping(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match=r"trainer\.early_stopping\.patiencez"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping:\n    patiencez: 2"))
+        )
+    with pytest.raises(ConfigError, match="trainer.early_stopping.patience must be an integer"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", 'epochs: 2\n  early_stopping:\n    patience: "two"'))
+        )
+    with pytest.raises(ConfigError, match="trainer.early_stopping.patience must be at least 1"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping:\n    patience: 0"))
+        )
+    with pytest.raises(ConfigError, match="trainer.early_stopping.min_delta must be a non-negative number"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping:\n    patience: 2\n    min_delta: -0.1"))
+        )
+    with pytest.raises(ConfigError, match="trainer.early_stopping.min_delta must be a non-negative number"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", 'epochs: 2\n  early_stopping:\n    patience: 2\n    min_delta: slow'))
+        )
+    with pytest.raises(ConfigError, match="trainer.early_stopping must be a mapping"):
+        load_config(write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping: 3")))
+    with pytest.raises(ConfigError, match="invalid trainer.early_stopping configuration"):
+        load_config(
+            write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping:\n    min_delta: 0.1"))
+        )
+
+
+def test_recovery_comparison_allows_early_stopping_changes(tmp_path: Path) -> None:
+    strict = load_config(
+        write_config(
+            tmp_path,
+            BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping:\n    patience: 2\n    min_delta: 0.1"),
+        )
+    )
+    relaxed = load_config(
+        write_config(tmp_path, BASE_CONFIG.replace("epochs: 2", "epochs: 2\n  early_stopping:\n    patience: 9"))
+    )
+    without = load_config(write_config(tmp_path))
+    changed_monitor = load_config(
+        write_config(
+            tmp_path,
+            BASE_CONFIG.replace(
+                "epochs: 2", "epochs: 2\n  early_stopping:\n    patience: 2\n  monitor: val_accuracy"
+            ),
+        )
+    )
+
+    assert configs_compatible(strict, relaxed)
+    assert configs_compatible(strict, without)
+    assert not configs_compatible(strict, changed_monitor)
+
+
 def test_recovery_comparison_treats_absent_newer_fields_as_defaults() -> None:
     legacy_checkpoint = {
         "experiment": {"name": "unit", "seed": 42, "runs_dir": "runs"},
@@ -207,7 +306,12 @@ def test_recovery_comparison_treats_absent_newer_fields_as_defaults() -> None:
         "trainer": {"epochs": 2, "device": "cpu", "validate_every": 1, "log_every": 10},
     }
     expected = dict(legacy_checkpoint)
-    expected["trainer"] = {**legacy_checkpoint["trainer"], "monitor": "val_loss", "max_grad_norm": None}
+    expected["trainer"] = {
+        **legacy_checkpoint["trainer"],
+        "monitor": "val_loss",
+        "max_grad_norm": None,
+        "accumulate": 1,
+    }
     expected["optimizer"] = {"name": "adamw", "lr": 0.01}
     expected["loss"] = {"name": "cross_entropy"}
 
@@ -222,3 +326,9 @@ def test_recovery_comparison_treats_absent_newer_fields_as_defaults() -> None:
     nulled = dict(expected)
     nulled["loss"] = None
     assert configs_compatible(legacy_checkpoint, nulled)
+    with_early_stopping = dict(expected)
+    with_early_stopping["trainer"] = {
+        **expected["trainer"],
+        "early_stopping": {"patience": 2, "min_delta": 0.0},
+    }
+    assert configs_compatible(legacy_checkpoint, with_early_stopping)

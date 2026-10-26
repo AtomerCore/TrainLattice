@@ -103,9 +103,11 @@ def test_trainer_aggregates_reductions_as_per_sample_means() -> None:
         )
         return trainer.train_epoch(loader)
 
-    mean_metrics = run_with("mean")
-    assert run_with("sum") == pytest.approx(mean_metrics)
-    assert run_with("none") == pytest.approx(mean_metrics)
+    # wall-clock fields differ between runs, so only the loss aggregates compare
+    mean_metrics = {key: value for key, value in run_with("mean").items() if key == "loss"}
+    assert mean_metrics
+    assert {key: value for key, value in run_with("sum").items() if key == "loss"} == pytest.approx(mean_metrics)
+    assert {key: value for key, value in run_with("none").items() if key == "loss"} == pytest.approx(mean_metrics)
 
 
 def test_loss_task_points_to_register_loss_for_taskless_registrations() -> None:
@@ -162,7 +164,8 @@ def test_regression_run_reports_loss_only_and_resumes(tmp_path: Path) -> None:
     first = run_experiment(regression_config(tmp_path), command="pytest sine")
 
     assert first.state.status == "finished"
-    assert set(first.state.latest_metrics) == {"train_loss", "val_loss"}
+    timing_keys = {"epoch_seconds", "data_seconds", "train_samples_per_sec"}
+    assert set(first.state.latest_metrics) - timing_keys == {"train_loss", "val_loss", "lr"}
     manifest = json.loads((first.run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert "torch.nn.modules.loss" in manifest["loss_source"]
     metrics_lines = (first.run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()

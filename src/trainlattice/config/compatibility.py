@@ -12,21 +12,24 @@ def recovery_config(config: ExperimentConfig | Mapping[str, Any]) -> dict[str, A
     """Return fields that must remain stable across a resumed run.
 
     Keys introduced after a checkpoint was saved compare as their default
-    values — optimizer names, the loss section, and trainer additions —
-    so checkpoints from earlier feature releases stay resumable.
+    values — optimizer names, the loss and scheduler sections, and trainer
+    additions — so checkpoints from earlier feature releases stay resumable.
     """
     data = deepcopy(config.to_dict() if isinstance(config, ExperimentConfig) else dict(config))
     experiment = data.get("experiment") or {}
     experiment.pop("runs_dir", None)
     trainer = data.get("trainer") or {}
-    for key in ("device", "log_every", "epochs"):
+    for key in ("device", "log_every", "epochs", "early_stopping"):
         trainer.pop(key, None)
     trainer.setdefault("monitor", "val_loss")
     trainer.setdefault("max_grad_norm", None)
+    trainer.setdefault("accumulate", 1)
+    trainer.setdefault("precision", "fp32")
     optimizer = data.get("optimizer") or {}
     optimizer.setdefault("name", "adamw")
     if not data.get("loss"):
         data["loss"] = {"name": "cross_entropy"}
+    data.setdefault("scheduler", None)
     return data
 
 

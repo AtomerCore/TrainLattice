@@ -269,6 +269,27 @@ class ExperimentConfig:
             and (not isinstance(max_grad_norm, (int, float)) or not max_grad_norm > 0)
         ):
             errors.append("trainer.max_grad_norm must be a positive number")
+        if not isinstance(self.trainer.accumulate, int) or isinstance(self.trainer.accumulate, bool):
+            errors.append("trainer.accumulate must be an integer")
+        elif self.trainer.accumulate < 1:
+            errors.append("trainer.accumulate must be at least 1")
+        if not isinstance(self.trainer.precision, str) or self.trainer.precision not in {"fp32", "bf16", "fp16"}:
+            errors.append("trainer.precision must be one of: fp32, bf16, fp16")
+        early_stopping = self.trainer.early_stopping
+        if early_stopping is not None:
+            if not isinstance(early_stopping, EarlyStoppingConfig):
+                errors.append("trainer.early_stopping must be a mapping")
+            else:
+                if not isinstance(early_stopping.patience, int) or isinstance(early_stopping.patience, bool):
+                    errors.append("trainer.early_stopping.patience must be an integer")
+                elif early_stopping.patience < 1:
+                    errors.append("trainer.early_stopping.patience must be at least 1")
+                if (
+                    isinstance(early_stopping.min_delta, bool)
+                    or not isinstance(early_stopping.min_delta, (int, float))
+                    or not early_stopping.min_delta >= 0
+                ):
+                    errors.append("trainer.early_stopping.min_delta must be a non-negative number")
         if errors:
             raise ConfigError("; ".join(errors))
 
