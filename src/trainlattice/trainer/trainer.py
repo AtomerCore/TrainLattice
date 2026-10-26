@@ -261,6 +261,9 @@ class Trainer:
                 sampler = getattr(train_loader, "sampler", None)
                 if hasattr(sampler, "set_epoch"):
                     sampler.set_epoch(epoch)
+                if self.device.type == "cuda":
+                    # the epoch's memory high-water mark starts from zero
+                    torch.cuda.reset_peak_memory_stats(self.device)
                 self._emit("on_epoch_start")
                 train_metrics = self.train_epoch(train_loader)
                 timing = {key: value for key, value in train_metrics.items() if key in EPOCH_TIMING_KEYS}
@@ -275,6 +278,8 @@ class Trainer:
                 if validation_loader is not None and (epoch + 1) % self.validate_every == 0:
                     validation_metrics = self.validate(validation_loader)
                     metrics.update({f"val_{key}": value for key, value in validation_metrics.items()})
+                if self.device.type == "cuda":
+                    metrics["max_memory_mb"] = torch.cuda.max_memory_allocated(self.device) / 1024**2
                 self.state.next_epoch = epoch + 1
                 self.state.latest_metrics = metrics
                 self._check_early_stopping()
