@@ -36,6 +36,8 @@ class ServiceRegistry:
 
     def resolve(self, service: str, api_version: int = 1) -> Any:
         """Resolve an active service with the requested exact API version."""
+        if type(api_version) is not int or api_version < 1:
+            raise PluginError("service API version must be a positive integer")
         item = self._items.get(service)
         if item is None:
             raise PluginError(f"service unavailable: {service} (API {api_version})")

@@ -3,6 +3,8 @@
 
 def activate(ctx):
     """Register dataset factories with their loader and shape contracts."""
+    from trainlattice.contracts.config import validate_plugin_options
+    validate_plugin_options(ctx.config(), ctx.plugin_id)
     from trainlattice.contracts.components import DatasetFactory
     from .loaders import build_dataloaders
     from .synthetic import build_synthetic, _validate_synthetic, _synthetic_contract

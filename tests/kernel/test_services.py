@@ -18,6 +18,8 @@ def test_context_binds_declared_dependencies_and_copies_configuration(tmp_path: 
     provider.provide("example.widget/answer", 42)
     consumer = PluginContextImpl(PluginManifest.read(write_plugin(tmp_path / "consumer", requires={"answer": {"service": "example.widget/default"}})), registry, {"answer": "example.widget/answer"}, {"nested": [1]})
     assert consumer.require("answer") == 42
+    with pytest.raises(PluginError, match="positive integer"):
+        registry.resolve("example.widget/answer", True)
     changed = consumer.config()
     changed["nested"].append(2)
     assert consumer.config() == {"nested": [1]}

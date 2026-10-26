@@ -3,6 +3,8 @@
 
 def activate(ctx):
     """Register cross entropy, mean squared error and absolute error."""
+    from trainlattice.contracts.config import validate_plugin_options
+    validate_plugin_options(ctx.config(), ctx.plugin_id)
     from torch import nn
     from trainlattice.contracts.components import LossFactory
     from .validation import _validate_cross_entropy, _validate_distance_loss

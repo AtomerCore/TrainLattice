@@ -3,6 +3,8 @@
 
 def activate(ctx):
     """Register the built-in optimization services."""
+    from trainlattice.contracts.config import validate_plugin_options
+    validate_plugin_options(ctx.config(), ctx.plugin_id)
     from torch.optim import Adam, AdamW, SGD
     from trainlattice.contracts.components import ComponentFactory
     from .optimizers import _validate_adam_family, _validate_sgd

@@ -9,6 +9,13 @@ from typing import Any, Mapping
 from trainlattice.errors import ConfigError
 
 
+def validate_plugin_options(options: Mapping[str, Any], plugin_id: str) -> None:
+    """Require empty private options for plugins that declare no settings."""
+    if options:
+        paths = ", ".join(f"plugins.{plugin_id}.config.{key}" for key in sorted(options))
+        raise ConfigError(f"unknown configuration field(s): {paths}")
+
+
 def _section(data: Mapping[str, Any], key: str) -> dict[str, Any]:
     value = data.get(key, {})
     if value is None:
