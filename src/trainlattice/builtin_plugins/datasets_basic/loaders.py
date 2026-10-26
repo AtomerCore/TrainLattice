@@ -8,8 +8,7 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 
-from trainlattice.config.schema import DatasetConfig
-from trainlattice.datasets.builtin import DATASETS, validate_dataset_config
+from trainlattice.contracts.config import DatasetConfig
 
 
 @dataclass(slots=True)
@@ -40,14 +39,14 @@ class EpochShuffleSampler(Sampler[int]):
         return len(self.data_source)
 
 
-def build_dataloaders(config: DatasetConfig, *, seed: int) -> DataLoaders:
+def build_dataloaders(config: DatasetConfig, *, seed: int, factory: Any) -> DataLoaders:
     """Build registered datasets and deterministic data loaders."""
-    validate_dataset_config(config)
+    factory.validate("dataset", config.options)
     options = dict(config.options)
     options.setdefault("seed", seed)
-    train_dataset = DATASETS.build(config.name, train=True, split="train", **options)
-    validation_dataset: Dataset[Any] | None = DATASETS.build(
-        config.name, train=False, split="validation", **options
+    train_dataset = factory.build( train=True, split="train", **options)
+    validation_dataset: Dataset[Any] | None = factory.build(
+        train=False, split="validation", **options
     )
     sampler = EpochShuffleSampler(train_dataset, seed=seed)
     train_loader = DataLoader(

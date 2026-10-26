@@ -9,9 +9,8 @@ from typing import Any
 import torch
 from torch.utils.data import Dataset, TensorDataset
 
-from trainlattice.config.contracts import ComponentContract
+from trainlattice.contracts.components import ComponentContract
 from trainlattice.errors import ConfigError
-from trainlattice.datasets.builtin import DATASETS
 
 
 def _resolve_root(options: Mapping[str, Any]) -> Path:
@@ -110,11 +109,3 @@ def _tensor_contract(options: Mapping[str, Any]) -> ComponentContract:
         num_classes=int(options.get("num_classes", 10)),
         input_shape=train_shape,
     )
-
-
-DATASETS.register(
-    "tensor",
-    build_tensor,
-    validate=_validate_tensor,
-    contract=_tensor_contract,
-)

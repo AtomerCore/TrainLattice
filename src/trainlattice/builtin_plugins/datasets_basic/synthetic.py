@@ -9,12 +9,9 @@ from typing import Any
 import torch
 from torch.utils.data import Dataset, TensorDataset
 
-from trainlattice.config.contracts import ComponentContract
-from trainlattice.config.schema import DatasetConfig
+from trainlattice.contracts.components import ComponentContract
 from trainlattice.errors import ConfigError
-from trainlattice.registry import Registry
 
-DATASETS: Registry[Dataset[Any]] = Registry("dataset")
 
 
 def build_synthetic(
@@ -70,21 +67,3 @@ def _synthetic_contract(options: Mapping[str, Any]) -> ComponentContract:
         num_classes=options.get("num_classes", 10),
         input_shape=tuple(shape) if well_formed else None,
     )
-
-
-DATASETS.register(
-    "synthetic",
-    build_synthetic,
-    validate=_validate_synthetic,
-    contract=_synthetic_contract,
-)
-
-
-def validate_dataset_config(config: DatasetConfig) -> None:
-    """Validate the options of the registered dataset."""
-    if config.name not in DATASETS:
-        choices = ", ".join(DATASETS.names())
-        raise ConfigError(f"unsupported dataset.name {config.name!r}; available: {choices}")
-    declaration = DATASETS.entry(config.name)
-    if declaration.validate is not None:
-        declaration.validate("dataset", config.options)

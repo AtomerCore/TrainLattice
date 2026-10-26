@@ -5,9 +5,11 @@ import pytest
 torch = pytest.importorskip("torch")
 from torch.utils.data import TensorDataset
 
-from trainlattice.config.schema import DatasetConfig
+from trainlattice.contracts.config import DatasetConfig
 from trainlattice.errors import ConfigError
-from trainlattice.datasets import DATASETS, EpochShuffleSampler, build_dataloaders
+from trainlattice.builtin_plugins.datasets_basic.loaders import EpochShuffleSampler
+from trainlattice.contracts.components import ComponentFactory
+from helpers import get_component, build_dataloaders
 
 
 def test_synthetic_loaders_expose_distinct_splits() -> None:
@@ -52,16 +54,15 @@ def test_epoch_sampler_order_depends_only_on_seed_and_epoch() -> None:
     assert list(first) != list(resumed)
 
 
-def test_registered_dataset_extension_point_builds_train_and_validation() -> None:
+def test_dataset_factory_builds_train_and_validation() -> None:
     name = "unit_split_dataset"
 
-    @DATASETS.register(name)
     def build_unit_dataset(*, train: bool, split: str | None = None, **_: Any) -> TensorDataset:
         sizes = {"train": 8, "validation": 2}
         values = torch.arange(sizes[split or "train"])
         return TensorDataset(values.float().unsqueeze(1), values)
 
-    loaders = build_dataloaders(DatasetConfig(name=name, batch_size=2), seed=5)
+    loaders = build_dataloaders(DatasetConfig(name=name, batch_size=2), seed=5, factory=ComponentFactory(name, build_unit_dataset))
 
     assert len(loaders.train.dataset) == 8
     assert loaders.validation is not None and len(loaders.validation.dataset) == 2
@@ -92,7 +93,7 @@ def test_tensor_loaders_read_split_files(tmp_path) -> None:
 def test_tensor_contract_states_on_disk_shape(tmp_path) -> None:
     _write_tensor_split(tmp_path, "train.pt", 8)
     _write_tensor_split(tmp_path, "validation.pt", 4)
-    contract = DATASETS.entry("tensor").contract
+    contract = get_component("dataset", "tensor").contract
 
     assert contract is not None
     declared = contract({"root": str(tmp_path), "num_classes": 3})
@@ -109,12 +110,12 @@ def test_tensor_reports_missing_root_and_files(tmp_path) -> None:
     empty_root = tmp_path / "data"
     empty_root.mkdir()
     with pytest.raises(ConfigError, match="dataset.train_file file not found"):
-        DATASETS.entry("tensor").contract({"root": str(empty_root)})
+        get_component("dataset", "tensor").contract({"root": str(empty_root)})
 
 
 def test_tensor_rejects_unreadable_and_inconsistent_files(tmp_path) -> None:
     (tmp_path / "train.pt").write_text("not a tensor file", encoding="utf-8")
-    contract = DATASETS.entry("tensor").contract
+    contract = get_component("dataset", "tensor").contract
 
     assert contract is not None
     with pytest.raises(ConfigError, match="dataset.train_file file could not be read"):
@@ -147,7 +148,7 @@ def test_tensor_rejects_empty_split_files(tmp_path) -> None:
     torch.save({"features": torch.randn(0, 3), "labels": torch.zeros(0, dtype=torch.long)}, tmp_path / "train.pt")
 
     with pytest.raises(ConfigError, match="dataset.train_file file must contain at least one sample"):
-        DATASETS.entry("tensor").contract({"root": str(tmp_path)})
+        get_component("dataset", "tensor").contract({"root": str(tmp_path)})
 
 
 def test_tensor_rejects_non_long_and_negative_labels(tmp_path) -> None:
@@ -156,14 +157,14 @@ def test_tensor_rejects_non_long_and_negative_labels(tmp_path) -> None:
         tmp_path / "train.pt",
     )
     with pytest.raises(ConfigError, match="dataset.train_file labels must be a Long"):
-        DATASETS.entry("tensor").contract({"root": str(tmp_path)})
+        get_component("dataset", "tensor").contract({"root": str(tmp_path)})
 
     torch.save(
         {"features": torch.randn(4, 3), "labels": torch.tensor([-1, 1, 2, 1], dtype=torch.long)},
         tmp_path / "train.pt",
     )
     with pytest.raises(ConfigError, match="dataset.train_file labels must be non-negative"):
-        DATASETS.entry("tensor").contract({"root": str(tmp_path)})
+        get_component("dataset", "tensor").contract({"root": str(tmp_path)})
 
 
 def test_tensor_rejects_train_validation_shape_disagreement(tmp_path) -> None:
@@ -177,4 +178,4 @@ def test_tensor_rejects_train_validation_shape_disagreement(tmp_path) -> None:
     )
 
     with pytest.raises(ConfigError, match=r"dataset.val_file feature shape \[1, 8, 8\] must match"):
-        DATASETS.entry("tensor").contract({"root": str(tmp_path)})
+        get_component("dataset", "tensor").contract({"root": str(tmp_path)})

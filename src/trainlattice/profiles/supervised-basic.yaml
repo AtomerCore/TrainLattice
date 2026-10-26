@@ -1,2 +1,4 @@
 plugins:
   - source: builtin://foundation-local
+  - source: builtin://models-basic
+  - source: builtin://datasets-basic

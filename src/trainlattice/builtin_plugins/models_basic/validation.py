@@ -7,13 +7,9 @@ from typing import Any
 
 from torch import nn
 
-from trainlattice.config.contracts import ComponentContract
-from trainlattice.config.schema import ModelConfig
+from trainlattice.contracts.components import ComponentContract
 from trainlattice.errors import ConfigError
-from trainlattice.modeling.architectures import CNN, MLP
-from trainlattice.registry import Registry
 
-ARCHITECTURES: Registry[nn.Module] = Registry("architecture")
 
 
 def _positive_integer(value: Any, path: str) -> int:
@@ -77,29 +73,3 @@ def _cnn_contract(options: Mapping[str, Any]) -> ComponentContract:
         num_classes=options.get("num_classes", 10),
         input_shape=tuple(options.get("input_shape", (1, 28, 28))),
     )
-
-
-ARCHITECTURES.register("mlp", MLP, validate=_validate_mlp, contract=_mlp_contract)
-ARCHITECTURES.register("cnn", CNN, validate=_validate_cnn, contract=_cnn_contract)
-
-
-def validate_model_config(config: ModelConfig) -> None:
-    """Validate the options of the registered architecture."""
-    if config.name not in ARCHITECTURES:
-        raise ConfigError(
-            f"unsupported model.name {config.name!r}; available: {', '.join(ARCHITECTURES.names())}"
-        )
-    declaration = ARCHITECTURES.entry(config.name)
-    if declaration.validate is not None:
-        declaration.validate("model", config.options)
-
-
-def build_model(config: ModelConfig) -> nn.Module:
-    """Construct a validated registered architecture."""
-    validate_model_config(config)
-    try:
-        return ARCHITECTURES.build(config.name, **config.options)
-    except ConfigError:
-        raise
-    except (TypeError, ValueError, RuntimeError) as exc:
-        raise ConfigError(f"invalid model configuration: {exc}") from exc
