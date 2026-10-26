@@ -11,17 +11,18 @@ pytest.importorskip("torch")
 import torch
 from torch.optim import SGD, Adam, AdamW
 
-from trainlattice.config.schema import OptimizerConfig
+from trainlattice.contracts.config import OptimizerConfig
 from trainlattice.errors import ConfigError
-from trainlattice.optim import OPTIMIZERS, build_optimizer, validate_optimizer_config
+from helpers import get_component, build_optimizer, validate_optimizer_config
+from trainlattice.kernel.errors import PluginError
 
 
 def _params() -> list[torch.nn.Parameter]:
     return [torch.nn.Parameter(torch.zeros(2))]
 
 
-def test_registry_contains_the_builtin_optimizers() -> None:
-    assert OPTIMIZERS.names() == ("adam", "adamw", "sgd")
+def test_services_expose_the_builtin_optimizers() -> None:
+    assert [get_component("optimizer", name).name for name in ("adam", "adamw", "sgd")] == ["adam", "adamw", "sgd"]
 
 
 def test_builds_each_builtin_with_options() -> None:
@@ -40,7 +41,7 @@ def test_builds_each_builtin_with_options() -> None:
 
 
 def test_rejects_unknown_and_invalid_options() -> None:
-    with pytest.raises(ConfigError, match=r"unsupported optimizer.name 'rmsprop'; available: adam, adamw, sgd"):
+    with pytest.raises(PluginError, match="trainlattice.optimizer/rmsprop"):
         validate_optimizer_config(OptimizerConfig("rmsprop"))
     with pytest.raises(ConfigError, match="optimizer.momentumum"):
         validate_optimizer_config(OptimizerConfig("sgd", options={"momentumum": 0.9}))
@@ -53,7 +54,7 @@ def test_rejects_unknown_and_invalid_options() -> None:
 def test_runs_end_to_end_with_sgd_and_records_source(tmp_path: Path) -> None:
     import json
 
-    from trainlattice.config.schema import (
+    from trainlattice.contracts.config import (
         DatasetConfig,
         ExperimentConfig,
         ExperimentSection,

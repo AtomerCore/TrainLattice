@@ -37,11 +37,10 @@ from typing import Any
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler, LambdaLR, StepLR
 
-from trainlattice.config.schema import SchedulerConfig
+from trainlattice.contracts.config import SchedulerConfig
 from trainlattice.errors import ConfigError
-from trainlattice.registry import Registry
+from trainlattice.contracts.components import ComponentFactory
 
-SCHEDULERS: Registry[LRScheduler] = Registry("scheduler")
 
 _WARMUP_NAMES = frozenset({"warmup_cosine", "warmup_linear"})
 
@@ -154,43 +153,16 @@ def _build_step_decay(optimizer: Optimizer, _total_steps: int | None, *, step_si
     return StepLR(optimizer, step_size=step_size, gamma=gamma)
 
 
-SCHEDULERS.register("warmup_cosine", _build_warmup_cosine, validate=_validate_warmup)
-SCHEDULERS.register("warmup_linear", _build_warmup_linear, validate=_validate_warmup)
-SCHEDULERS.register("step_decay", _build_step_decay, validate=_validate_step_decay)
+class SchedulerFactory(ComponentFactory):
+    """A scheduler factory that resolves and validates its step budget."""
 
-
-def validate_scheduler_config(config: SchedulerConfig) -> None:
-    """Validate the options of the registered scheduler."""
-    if config.name not in SCHEDULERS:
-        choices = ", ".join(SCHEDULERS.names())
-        raise ConfigError(f"unsupported scheduler.name {config.name!r}; available: {choices}")
-    declaration = SCHEDULERS.entry(config.name)
-    if declaration.validate is not None:
-        declaration.validate("scheduler", config.options)
-
-
-def build_scheduler(
-    config: SchedulerConfig, optimizer: Optimizer, total_steps: int | None = None
-) -> LRScheduler:
-    """Construct a validated registered scheduler over the optimizer.
-
-    ``total_steps`` resolves from the explicit scheduler option first and from
-    the runtime-supplied argument second; warmup schedulers reject the build
-    when neither is available.
-    """
-    validate_scheduler_config(config)
-    resolved = config.options.get("total_steps", total_steps)
-    if resolved is not None:
-        _positive_int(resolved, "scheduler.total_steps")
-    elif config.name in _WARMUP_NAMES:
-        raise ConfigError(
-            f"scheduler.total_steps is required by {config.name}; "
-            "set it in the scheduler section or derive it from the run"
-        )
-    options = {key: value for key, value in config.options.items() if key != "total_steps"}
-    try:
-        return SCHEDULERS.build(config.name, optimizer, resolved, **options)
-    except ConfigError:
-        raise
-    except (TypeError, ValueError, RuntimeError) as exc:
-        raise ConfigError(f"invalid scheduler configuration: {exc}") from exc
+    def create(self, config: SchedulerConfig, optimizer: Optimizer, total_steps: int | None = None) -> LRScheduler:
+        """Construct the selected schedule with explicit-budget precedence."""
+        self.validate("scheduler", config.options)
+        resolved = config.options.get("total_steps", total_steps)
+        if resolved is not None:
+            _positive_int(resolved, "scheduler.total_steps")
+        elif self.name in _WARMUP_NAMES:
+            raise ConfigError(f"scheduler.total_steps is required by {self.name}; set it in the scheduler section or derive it from the run")
+        options = {key: value for key, value in config.options.items() if key != "total_steps"}
+        return self.build(optimizer, resolved, **options)

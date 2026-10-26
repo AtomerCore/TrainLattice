@@ -2,3 +2,6 @@ plugins:
   - source: builtin://foundation-local
   - source: builtin://models-basic
   - source: builtin://datasets-basic
+  - source: builtin://optim-basic
+  - source: builtin://tasks-basic
+  - source: builtin://losses-basic

@@ -8,11 +8,8 @@ from typing import Any
 import torch
 from torch.optim import Optimizer
 
-from trainlattice.config.schema import OptimizerConfig
 from trainlattice.errors import ConfigError
-from trainlattice.registry import Registry
 
-OPTIMIZERS: Registry[Optimizer] = Registry("optimizer")
 
 
 def _reject_unknown(path: str, options: Mapping[str, Any], allowed: set[str]) -> None:
@@ -63,29 +60,3 @@ def _validate_sgd(path: str, options: Mapping[str, Any]) -> None:
             _non_negative_number(options[key], f"{path}.{key}")
     if "nesterov" in options and not isinstance(options["nesterov"], bool):
         raise ConfigError(f"{path}.nesterov must be a boolean")
-
-
-OPTIMIZERS.register("adamw", torch.optim.AdamW, validate=_validate_adam_family)
-OPTIMIZERS.register("adam", torch.optim.Adam, validate=_validate_adam_family)
-OPTIMIZERS.register("sgd", torch.optim.SGD, validate=_validate_sgd)
-
-
-def validate_optimizer_config(config: OptimizerConfig) -> None:
-    """Validate the options of the registered optimizer."""
-    if config.name not in OPTIMIZERS:
-        choices = ", ".join(OPTIMIZERS.names())
-        raise ConfigError(f"unsupported optimizer.name {config.name!r}; available: {choices}")
-    declaration = OPTIMIZERS.entry(config.name)
-    if declaration.validate is not None:
-        declaration.validate("optimizer", config.options)
-
-
-def build_optimizer(config: OptimizerConfig, params: Any) -> Optimizer:
-    """Construct a validated registered optimizer over the model parameters."""
-    validate_optimizer_config(config)
-    try:
-        return OPTIMIZERS.build(config.name, params, lr=config.lr, **config.options)
-    except ConfigError:
-        raise
-    except (TypeError, ValueError, RuntimeError) as exc:
-        raise ConfigError(f"invalid optimizer configuration: {exc}") from exc
