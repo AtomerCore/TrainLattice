@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 from importlib import resources
 from pathlib import Path
 import re
@@ -16,6 +17,14 @@ class PluginSource:
 
     locator: str
     root: Path
+
+
+@dataclass(frozen=True, slots=True)
+class PluginRequest:
+    """An explicit source plus plugin-private configuration."""
+
+    source: str
+    config: dict[str, Any] = field(default_factory=dict)
 
 
 class PluginSourceResolver:
