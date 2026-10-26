@@ -1,4 +1,4 @@
-"""Device selection and diagnostics."""
+"""Local runtime device selection and diagnostics."""
 
 from __future__ import annotations
 

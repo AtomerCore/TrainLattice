@@ -1,4 +1,4 @@
-"""Runtime environment and source revision capture."""
+"""Local runtime environment, revision capture and atomic metadata writes."""
 
 from __future__ import annotations
 

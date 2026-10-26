@@ -7,13 +7,14 @@ import pytest
 
 pytest.importorskip("torch")
 
-from trainlattice.runtime.environment import write_json
+from trainlattice.builtin_plugins.foundation_local.environment import write_json
 
 
 def test_write_json_retries_transient_replace_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("trainlattice.builtin_plugins.foundation_local.environment.time.sleep", lambda _: None)
     write_json({"status": "created"}, tmp_path / "manifest.json")
     calls = {"count": 0}
     real_replace = Path.replace
@@ -35,6 +36,7 @@ def test_write_json_cleans_temporary_after_persistent_replace_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("trainlattice.builtin_plugins.foundation_local.environment.time.sleep", lambda _: None)
     def locked_replace(self: Path, target):
         raise PermissionError("target held open")
 

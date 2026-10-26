@@ -1,4 +1,4 @@
-"""Process-wide reproducibility settings."""
+"""Local runtime's process-wide reproducibility settings."""
 
 from __future__ import annotations
 
