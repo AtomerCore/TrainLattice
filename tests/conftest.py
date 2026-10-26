@@ -29,7 +29,7 @@ def _isolate_component_registries():
     try:
         from trainlattice.datasets import DATASETS
         from trainlattice.modeling import ARCHITECTURES
-        from trainlattice.optim import OPTIMIZERS
+        from trainlattice.optim import OPTIMIZERS, SCHEDULERS
         from trainlattice.trainer.losses import LOSS_TASKS, LOSSES
     except Exception:
         yield
@@ -38,6 +38,7 @@ def _isolate_component_registries():
         DATASETS: dict(DATASETS._items),
         ARCHITECTURES: dict(ARCHITECTURES._items),
         OPTIMIZERS: dict(OPTIMIZERS._items),
+        SCHEDULERS: dict(SCHEDULERS._items),
         LOSSES: dict(LOSSES._items),
     }
     saved_tasks = dict(LOSS_TASKS)

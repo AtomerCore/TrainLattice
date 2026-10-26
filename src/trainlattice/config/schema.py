@@ -125,6 +125,31 @@ class LossConfig:
 
 
 @dataclass(slots=True)
+class SchedulerConfig:
+    """Scheduler name and scheduler-specific options."""
+
+    name: str
+    options: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "SchedulerConfig":
+        values = dict(data)
+        name = _require_string(values.pop("name", ""), "scheduler.name")
+        return cls(name=name, options=values)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, **self.options}
+
+
+@dataclass(slots=True)
+class EarlyStoppingConfig:
+    """Patience-based stopping criteria for the monitored validation metric."""
+
+    patience: int
+    min_delta: float = 0.0
+
+
+@dataclass(slots=True)
 class TrainerConfig:
     """Training-loop controls."""
 
@@ -134,6 +159,22 @@ class TrainerConfig:
     log_every: int = 10
     monitor: str = "val_loss"
     max_grad_norm: float | None = None
+    accumulate: int = 1
+    precision: str = "fp32"
+    early_stopping: EarlyStoppingConfig | None = None
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "TrainerConfig":
+        """Build the trainer section, parsing the nested early-stopping mapping."""
+        values = dict(data)
+        early = values.pop("early_stopping", None)
+        if early is not None:
+            if not isinstance(early, Mapping):
+                raise ConfigError("trainer.early_stopping must be a mapping")
+            early = _fixed_section(EarlyStoppingConfig, dict(early), "trainer.early_stopping")
+        section = _fixed_section(cls, values, "trainer")
+        section.early_stopping = early
+        return section
 
 
 @dataclass(slots=True)
@@ -146,12 +187,13 @@ class ExperimentConfig:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
     loss: LossConfig = field(default_factory=LossConfig)
+    scheduler: SchedulerConfig | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ExperimentConfig":
         if not isinstance(data, Mapping):
             raise ConfigError("configuration root must be a mapping")
-        allowed_sections = {"experiment", "model", "dataset", "optimizer", "trainer", "loss"}
+        allowed_sections = {"experiment", "model", "dataset", "optimizer", "trainer", "loss", "scheduler"}
         unknown = sorted(set(data) - allowed_sections)
         if unknown:
             raise ConfigError(f"unknown configuration section(s): {', '.join(unknown)}")
@@ -160,8 +202,11 @@ class ExperimentConfig:
             model=ModelConfig.from_dict(_section(data, "model")),
             dataset=DatasetConfig.from_dict(_section(data, "dataset")),
             optimizer=OptimizerConfig.from_dict(_section(data, "optimizer")),
-            trainer=_fixed_section(TrainerConfig, _section(data, "trainer"), "trainer"),
+            trainer=TrainerConfig.from_dict(_section(data, "trainer")),
             loss=LossConfig.from_dict(_section(data, "loss")),
+            scheduler=(
+                SchedulerConfig.from_dict(_section(data, "scheduler")) if data.get("scheduler") is not None else None
+            ),
         )
         config.validate()
         return config
@@ -182,6 +227,8 @@ class ExperimentConfig:
             errors.append("optimizer.name must be a non-empty string")
         if not isinstance(self.loss.name, str) or not self.loss.name:
             errors.append("loss.name must be a non-empty string")
+        if self.scheduler is not None and (not isinstance(self.scheduler.name, str) or not self.scheduler.name):
+            errors.append("scheduler.name must be a non-empty string")
         if (
             not isinstance(self.optimizer.lr, (int, float))
             or isinstance(self.optimizer.lr, bool)
@@ -226,7 +273,7 @@ class ExperimentConfig:
             raise ConfigError("; ".join(errors))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "experiment": asdict(self.experiment),
             "model": self.model.to_dict(),
             "dataset": self.dataset.to_dict(),
@@ -234,3 +281,6 @@ class ExperimentConfig:
             "trainer": asdict(self.trainer),
             "loss": self.loss.to_dict(),
         }
+        if self.scheduler is not None:
+            data["scheduler"] = self.scheduler.to_dict()
+        return data
