@@ -12,18 +12,10 @@ torch = pytest.importorskip("torch")
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from trainlattice.config.schema import (
-    DatasetConfig,
-    ExperimentConfig,
-    ExperimentSection,
-    ModelConfig,
-    OptimizerConfig,
-    SchedulerConfig,
-    TrainerConfig,
-)
+from trainlattice.contracts.config import DatasetConfig, ExperimentConfig, ExperimentSection, ModelConfig, OptimizerConfig, SchedulerConfig, TrainerConfig
 from trainlattice.errors import TrainLatticeError
-from trainlattice.runtime.runner import run_experiment
-from trainlattice.trainer import Trainer
+from helpers import run_experiment
+from helpers import Trainer
 
 
 def test_accumulated_window_matches_the_full_batch_step() -> None:

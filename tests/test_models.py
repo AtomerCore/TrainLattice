@@ -2,29 +2,30 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from trainlattice.config.schema import ModelConfig
+from trainlattice.contracts.config import ModelConfig
 from trainlattice.errors import ConfigError
-from trainlattice.modeling import ARCHITECTURES, build_model, validate_model_config
-from trainlattice.modeling.architectures import CNN, MLP
+from helpers import get_component, build_model, validate_model_config
+from trainlattice.kernel.errors import PluginError
 
 
 def test_builds_configurable_mlp() -> None:
     config = ModelConfig("mlp", {"input_dim": 12, "hidden_dims": [8, 4], "num_classes": 3})
     model = build_model(config)
 
-    assert isinstance(model, MLP)
+    assert type(model).__name__ == "MLP"
     assert model(torch.randn(2, 3, 2, 2)).shape == (2, 3)
     dropouts = [module for module in model.network if isinstance(module, torch.nn.Dropout)]
     assert len(dropouts) == 2
     assert all(module.p == 0.1 for module in dropouts)
 
 
-def test_architecture_registry_exposes_cnn_and_mlp() -> None:
-    assert ARCHITECTURES.names() == ("cnn", "mlp")
+def test_model_services_expose_cnn_and_mlp() -> None:
+    assert get_component("model", "cnn").name == "cnn"
+    assert get_component("model", "mlp").name == "mlp"
 
 
 def test_rejects_unsupported_architecture() -> None:
-    with pytest.raises(ConfigError, match="unsupported model.name 'unknown'"):
+    with pytest.raises(PluginError, match="service unavailable: trainlattice.model/unknown"):
         build_model(ModelConfig("unknown", {}))
 
 
@@ -48,7 +49,7 @@ def test_builds_configurable_cnn() -> None:
     config = ModelConfig("cnn", {"input_shape": [1, 8, 8], "channels": [4, 8], "num_classes": 3})
     model = build_model(config)
 
-    assert isinstance(model, CNN)
+    assert type(model).__name__ == "CNN"
     assert model(torch.randn(2, 1, 8, 8)).shape == (2, 3)
     convs = [module for module in model.network if isinstance(module, torch.nn.Conv2d)]
     assert [(conv.in_channels, conv.out_channels) for conv in convs] == [(1, 4), (4, 8)]
@@ -71,7 +72,7 @@ def test_rejects_cnn_shape_below_pooling_factor() -> None:
 
 
 def test_cnn_contract_states_structured_shape() -> None:
-    contract = ARCHITECTURES.entry("cnn").contract
+    contract = get_component("model", "cnn").contract
 
     assert contract is not None
     declared = contract({"input_shape": [3, 32, 32], "num_classes": 5})

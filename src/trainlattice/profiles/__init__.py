@@ -1,0 +1,1 @@
+"""Static, installed plugin compositions."""

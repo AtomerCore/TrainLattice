@@ -27,7 +27,7 @@ def test_unknown_command_is_rejected(capsys: pytest.CaptureFixture[str]) -> None
 
 def test_invalid_config_returns_domain_exit_code(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config = tmp_path / "invalid.yaml"
-    config.write_text("trainr:\n  epochs: 2\n", encoding="utf-8")
+    config.write_text("profile: supervised-basic\ntrainr:\n  epochs: 2\n", encoding="utf-8")
 
     assert main(["train", str(config)]) == 2
     assert "unknown configuration section" in capsys.readouterr().err
@@ -37,15 +37,14 @@ def test_verbose_runs_record_the_flag_in_the_manifest(tmp_path: Path, capsys: py
     config = tmp_path / "verbose.yaml"
     config.write_text(
         f"""
+profile: supervised-basic
 experiment:
   name: cli-verbose
   runs_dir: "{(tmp_path / "runs").as_posix()}"
 model:
-  name: mlp
   input_dim: 4
   hidden_dims: [8]
 dataset:
-  name: synthetic
   batch_size: 4
   samples: 8
   val_samples: 4

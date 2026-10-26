@@ -651,25 +651,29 @@ wheels = [
 
 [[package]]
 name = "trainlattice"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },
-    { name = "torch" },
 ]
 
 [package.optional-dependencies]
 test = [
     { name = "pytest" },
+    { name = "torch" },
+]
+train = [
+    { name = "torch" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "torch", specifier = ">=2.1" },
+    { name = "torch", marker = "extra == 'test'", specifier = ">=2.1" },
+    { name = "torch", marker = "extra == 'train'", specifier = ">=2.1" },
 ]
-provides-extras = ["test"]
+provides-extras = ["train", "test"]
 
 [[package]]
 name = "triton"

@@ -8,7 +8,7 @@ pytest.importorskip("torch")
 
 import torch
 
-from trainlattice.config.schema import (
+from trainlattice.contracts.config import (
     DatasetConfig,
     ExperimentConfig,
     ExperimentSection,
@@ -16,8 +16,8 @@ from trainlattice.config.schema import (
     OptimizerConfig,
     TrainerConfig,
 )
-from trainlattice.runtime.runner import run_experiment
-from trainlattice.runtime.device import select_device
+from helpers import run_experiment
+from trainlattice.builtin_plugins.foundation_local.device import select_device
 from trainlattice.errors import ConfigError, TrainLatticeError
 
 
@@ -39,7 +39,7 @@ def test_run_creates_reproducible_artifacts_and_resumes(tmp_path: Path) -> None:
     config = tiny_config(tmp_path)
     first = run_experiment(config, command="pytest runtime")
 
-    for name in ("config.yaml", "environment.json", "manifest.json", "metrics.jsonl"):
+    for name in ("config.yaml", "environment.json", "manifest.json", "metrics.jsonl", "plugins.lock.json"):
         assert (first.run_dir / name).is_file()
     assert (first.run_dir / "checkpoints" / "last.pt").is_file()
     first_manifest = json.loads((first.run_dir / "manifest.json").read_text(encoding="utf-8"))

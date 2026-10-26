@@ -1,26 +1,27 @@
+profile: supervised-basic
+bindings:
+  org.trainlattice.experiment.default:
+    model: trainlattice.model/mlp
+    dataset: trainlattice.dataset/tensor
 experiment:
   name: tensor-mlp-smoke
   seed: 42
   runs_dir: runs
-
 model:
-  name: mlp
   input_dim: 784
-  hidden_dims: [64, 32]
+  hidden_dims:
+  - 64
+  - 32
   num_classes: 10
-
 dataset:
-  name: tensor
   batch_size: 32
   num_workers: 0
   root: data/tensor
   train_file: train.pt
   val_file: validation.pt
   num_classes: 10
-
 optimizer:
   lr: 0.001
-
 trainer:
   epochs: 2
   device: auto

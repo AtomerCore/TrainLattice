@@ -10,15 +10,8 @@ import pytest
 
 pytest.importorskip("torch")
 
-from trainlattice.config.schema import (
-    DatasetConfig,
-    ExperimentConfig,
-    ExperimentSection,
-    ModelConfig,
-    OptimizerConfig,
-    TrainerConfig,
-)
-from trainlattice.runtime.runner import run_experiment
+from trainlattice.contracts.config import DatasetConfig, ExperimentConfig, ExperimentSection, ModelConfig, OptimizerConfig, TrainerConfig
+from helpers import run_experiment
 
 # wall-clock and memory fields vary between runs and are excluded from equality checks
 TIMING_KEYS = {"steps_per_sec", "samples_per_sec", "epoch_seconds", "data_seconds", "train_samples_per_sec"}

@@ -14,20 +14,13 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler, LambdaLR, StepLR
 
 import trainlattice
-from trainlattice.config import configs_compatible, load_config
-from trainlattice.config.schema import (
-    DatasetConfig,
-    ExperimentConfig,
-    ExperimentSection,
-    ModelConfig,
-    OptimizerConfig,
-    SchedulerConfig,
-    TrainerConfig,
-)
+from trainlattice.builtin_plugins.checkpoint_local.config import configs_compatible
+from helpers import load_config
+from trainlattice.contracts.config import DatasetConfig, ExperimentConfig, ExperimentSection, ModelConfig, OptimizerConfig, SchedulerConfig, TrainerConfig
 from trainlattice.errors import ConfigError, TrainLatticeError
-from trainlattice.callbacks import Callback
-from trainlattice.optim import SCHEDULERS, build_scheduler, validate_scheduler_config
-from trainlattice.runtime.runner import run_experiment
+from trainlattice.contracts.callbacks import Callback
+from helpers import build_scheduler, validate_scheduler_config
+from helpers import run_experiment
 
 
 BASE_CONFIG = """
@@ -77,9 +70,9 @@ def _learning_rates(optimizer: Optimizer, scheduler: LRScheduler, steps: int) ->
     return rates
 
 
-def test_registry_contains_the_builtin_schedulers() -> None:
-    assert SCHEDULERS.names() == ("step_decay", "warmup_cosine", "warmup_linear")
-    assert trainlattice.SCHEDULERS is SCHEDULERS
+def test_services_contain_the_builtin_schedulers() -> None:
+    from helpers import get_component
+    assert tuple(get_component("scheduler", name).name for name in ("step_decay", "warmup_cosine", "warmup_linear")) == ("step_decay", "warmup_cosine", "warmup_linear")
 
 
 def test_scheduler_section_defaults_to_constant_learning_rate(tmp_path: Path) -> None:
@@ -120,7 +113,7 @@ def test_rejects_invalid_scheduler_sections(tmp_path: Path) -> None:
 
 def test_rejects_unknown_and_invalid_options() -> None:
     with pytest.raises(
-        ConfigError, match=r"unsupported scheduler.name 'cosine'; available: step_decay, warmup_cosine, warmup_linear"
+        TrainLatticeError, match=r"service unavailable: trainlattice.scheduler/cosine"
     ):
         validate_scheduler_config(SchedulerConfig("cosine"))
     with pytest.raises(ConfigError, match="unknown configuration field\\(s\\): scheduler.warmupstep"):
@@ -312,7 +305,7 @@ def test_resume_rejects_adding_a_scheduler_to_a_schedulerless_checkpoint(tmp_pat
         runtime_config(tmp_path, epochs=1, scheduler=None), command="pytest schedulerless"
     )
 
-    with pytest.raises(TrainLatticeError, match="incompatible"):
+    with pytest.raises(TrainLatticeError, match="plugin graph.*mismatch"):
         run_experiment(
             runtime_config(
                 tmp_path, epochs=2, scheduler=SchedulerConfig("step_decay", {"step_size": 2})

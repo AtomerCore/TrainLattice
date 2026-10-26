@@ -1,0 +1,17 @@
+plugins:
+  - source: builtin://foundation-local
+  - source: builtin://models-basic
+  - source: builtin://datasets-basic
+  - source: builtin://optim-basic
+  - source: builtin://tasks-basic
+  - source: builtin://losses-basic
+  - source: builtin://checkpoint-local
+  - source: builtin://metrics-basic
+  - source: builtin://logging-basic
+  - source: builtin://callbacks-basic
+  - source: builtin://trainer-supervised
+  - source: builtin://experiment-default
+  - source: builtin://train-command
+bindings:
+  org.trainlattice.experiment.default:
+    scheduler: null

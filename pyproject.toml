@@ -4,25 +4,28 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trainlattice"
-version = "0.4.0"
+version = "0.5.0"
 description = "A lightweight and transparent deep learning training runtime."
-readme = "README.md"
+readme = { text = "TrainLattice composes local training through manifest-defined native plugins, explicit service bindings, and checkpoint v5 recovery.", content-type = "text/plain" }
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "TrainLattice contributors" }]
 dependencies = [
   "PyYAML>=6.0",
-  "torch>=2.1",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+train = ["torch>=2.1"]
+test = ["pytest>=8.0", "torch>=2.1"]
 
 [project.scripts]
 trainlattice = "trainlattice.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/trainlattice"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/docs", "/.zcode", "/.pytest_cache"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

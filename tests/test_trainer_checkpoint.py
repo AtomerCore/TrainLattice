@@ -9,22 +9,16 @@ torch = pytest.importorskip("torch")
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from trainlattice.callbacks import Callback, CheckpointCallback
-from trainlattice.checkpoint import CheckpointManager
-from trainlattice.config.schema import (
-    DatasetConfig,
-    ExperimentConfig,
-    ExperimentSection,
-    ModelConfig,
-    OptimizerConfig,
-    SchedulerConfig,
-    TrainerConfig,
-)
-from trainlattice.datasets import build_dataloaders
+from trainlattice.contracts.callbacks import Callback
+from trainlattice.builtin_plugins.callbacks_basic.callbacks import CheckpointCallback
+from helpers import CheckpointManager
+from trainlattice.contracts.config import DatasetConfig, ExperimentConfig, ExperimentSection, ModelConfig, OptimizerConfig, SchedulerConfig, TrainerConfig
+from helpers import build_dataloaders
 from trainlattice.errors import CheckpointError
-from trainlattice.optim import build_scheduler
-from trainlattice.runtime.runner import run_experiment
-from trainlattice.trainer import Trainer, TrainerState
+from helpers import build_scheduler
+from helpers import run_experiment
+from helpers import Trainer
+from trainlattice.contracts.state import TrainerState
 
 
 class EventRecorder(Callback):
@@ -254,7 +248,7 @@ def test_checkpoint_accepts_runtime_only_config_changes(tmp_path: Path) -> None:
     assert resumed.next_epoch == 0
 
 
-@pytest.mark.parametrize("version", [2, 5])
+@pytest.mark.parametrize("version", [3, 4])
 def test_checkpoint_rejects_unsupported_format_version(tmp_path: Path, version: int) -> None:
     model = nn.Linear(4, 2)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
@@ -267,8 +261,8 @@ def test_checkpoint_rejects_unsupported_format_version(tmp_path: Path, version: 
         config={},
     )
     payload = torch.load(current, weights_only=False)
-    assert payload["format_version"] == 4
-    assert "scheduler" not in payload
+    assert payload["format_version"] == 5
+    assert payload["scheduler"] is None
     payload["format_version"] = version
     legacy = manager.directory / f"legacy-{version}.pt"
     torch.save(payload, legacy)
@@ -303,12 +297,12 @@ def logged_learning_rates(run_dir: Path) -> dict[int, float]:
     return {record["step"]: record["lr"] for record in records if record["phase"] == "train"}
 
 
-def test_scheduler_state_round_trips_through_format_v4(tmp_path: Path) -> None:
+def test_scheduler_state_round_trips_through_format_v5(tmp_path: Path) -> None:
     uninterrupted = run_experiment(scheduler_run_config(tmp_path, epochs=2), command="pytest uninterrupted")
     first = run_experiment(scheduler_run_config(tmp_path, epochs=1), command="pytest first stage")
 
     payload = torch.load(first.run_dir / "checkpoints" / "last.pt", weights_only=False)
-    assert payload["format_version"] == 4
+    assert payload["format_version"] == 5
     assert payload["scheduler"]["last_epoch"] == 3
     assert payload["scheduler_budget"] == 6
 
@@ -323,81 +317,14 @@ def test_scheduler_state_round_trips_through_format_v4(tmp_path: Path) -> None:
         assert rate == pytest.approx(reference[step])
 
 
-def test_stateless_checkpoint_replay_reconstructs_recursive_schedules(tmp_path: Path) -> None:
+def test_checkpoint_requires_scheduler_state(tmp_path: Path) -> None:
     model = nn.Linear(4, 2)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-    scheduler = build_scheduler(SchedulerConfig("step_decay", {"step_size": 2, "gamma": 0.5}), optimizer)
-    for _ in range(4):
-        optimizer.step()
-        scheduler.step()
-    # four steps cross two decay boundaries: 0.1 * 0.5 * 0.5
-    assert optimizer.param_groups[0]["lr"] == pytest.approx(0.025)
-
-    manager = CheckpointManager(tmp_path / "replay")
-    # saved without scheduler state, as a checkpoint from a schedulerless run
-    manager.save(
-        "last.pt", model=model, optimizer=optimizer, trainer_state=TrainerState(global_step=4), config={}
-    )
-
-    restored_model = nn.Linear(4, 2)
-    restored_optimizer = torch.optim.SGD(restored_model.parameters(), lr=0.1)
-    restored_scheduler = build_scheduler(
-        SchedulerConfig("step_decay", {"step_size": 2, "gamma": 0.5}), restored_optimizer
-    )
-    manager.load(
-        manager.directory / "last.pt",
-        model=restored_model,
-        optimizer=restored_optimizer,
-        scheduler=restored_scheduler,
-    )
-
-    assert restored_scheduler.last_epoch == 4
-    assert restored_optimizer.param_groups[0]["lr"] == pytest.approx(0.025)
-    assert restored_scheduler.get_last_lr() == pytest.approx([0.025])
-
-
-def test_format_v3_checkpoint_rebuilds_scheduler_at_saved_step(tmp_path: Path) -> None:
-    model = nn.Linear(4, 2)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-    scheduler = build_scheduler(
-        SchedulerConfig("warmup_cosine", {"warmup_steps": 2, "min_lr": 0.01}), optimizer, total_steps=10
-    )
-    for _ in range(5):
-        optimizer.step()
-        scheduler.step()
-    expected = 0.01 + (0.1 - 0.01) * (1 + cos(pi * (5 - 2) / (10 - 2))) / 2
-    assert optimizer.param_groups[0]["lr"] == pytest.approx(expected)
-
-    manager = CheckpointManager(tmp_path / "anchored")
-    saved = manager.save(
-        "last.pt",
-        model=model,
-        optimizer=optimizer,
-        trainer_state=TrainerState(global_step=5),
-        config={},
-        scheduler_state=scheduler.state_dict(),
-    )
-    payload = torch.load(saved, weights_only=False)
-    assert payload["format_version"] == 4
-    assert payload["scheduler"]["last_epoch"] == 5
-    del payload["scheduler"]
-    payload["format_version"] = 3
-    legacy = manager.directory / "v3.pt"
-    torch.save(payload, legacy)
-
-    restored_model = nn.Linear(4, 2)
-    restored_optimizer = torch.optim.SGD(restored_model.parameters(), lr=0.1)
-    restored_scheduler = build_scheduler(
-        SchedulerConfig("warmup_cosine", {"warmup_steps": 2, "min_lr": 0.01}), restored_optimizer, total_steps=10
-    )
-    state = manager.load(
-        legacy, model=restored_model, optimizer=restored_optimizer, scheduler=restored_scheduler
-    )
-
-    assert state.global_step == 5
-    assert restored_scheduler.last_epoch == 5
-    assert restored_optimizer.param_groups[0]["lr"] == pytest.approx(expected)
-    assert restored_scheduler.get_last_lr() == pytest.approx([expected])
+    manager = CheckpointManager(tmp_path / "missing-state")
+    path = manager.save("last.pt", model=model, optimizer=optimizer, trainer_state=TrainerState(), config={})
+    scheduler = build_scheduler(SchedulerConfig("step_decay", {"step_size": 2}), optimizer)
+    with pytest.raises(CheckpointError, match="missing scheduler state"):
+        manager.load(path, model=model, optimizer=optimizer, scheduler=scheduler)
 
 
 class GradNormRecorder(Callback):

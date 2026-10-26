@@ -1,4 +1,4 @@
-"""Loss registry, task declaration, and regression training behavior."""
+"""Loss services, task declaration, and regression training behavior."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset, TensorDataset
 
-from trainlattice.config.schema import (
+from trainlattice.contracts.config import (
     DatasetConfig,
     ExperimentConfig,
     ExperimentSection,
@@ -25,20 +25,14 @@ from trainlattice.config.schema import (
     OptimizerConfig,
     TrainerConfig,
 )
-from trainlattice.errors import ConfigError, RegistryError
-from trainlattice.runtime.runner import run_experiment
-from trainlattice.trainer.losses import (
-    LOSSES,
-    build_loss,
-    loss_task,
-    register_loss,
-    validate_loss_config,
-)
-from trainlattice.config import ComponentContract
+from trainlattice.errors import ConfigError, TrainLatticeError
+from helpers import run_experiment
+from helpers import build_loss, loss_task, validate_loss_config
+
+from trainlattice.contracts.components import ComponentContract, Task
 
 
-def test_registry_declares_tasks_for_builtin_losses() -> None:
-    assert LOSSES.names() == ("cross_entropy", "l1", "mse")
+def test_services_declare_tasks_for_builtin_losses() -> None:
     assert loss_task("cross_entropy") == "classification"
     assert loss_task("mse") == "regression"
     assert loss_task("l1") == "regression"
@@ -48,7 +42,7 @@ def test_builds_and_validates_losses() -> None:
     assert isinstance(build_loss(LossConfig()), nn.CrossEntropyLoss)
     assert isinstance(build_loss(LossConfig("mse")), nn.MSELoss)
 
-    with pytest.raises(ConfigError, match=r"unsupported loss.name 'huber'; available: cross_entropy, l1, mse"):
+    with pytest.raises(TrainLatticeError, match=r"service unavailable: trainlattice.loss/huber"):
         validate_loss_config(LossConfig("huber"))
     with pytest.raises(ConfigError, match="loss.label_smoothingx"):
         validate_loss_config(LossConfig("cross_entropy", {"label_smoothingx": 0.1}))
@@ -58,19 +52,13 @@ def test_builds_and_validates_losses() -> None:
         validate_loss_config(LossConfig("mse", {"reduction": "avg"}))
 
 
-def test_register_loss_rejects_unknown_task_kinds() -> None:
-    with pytest.raises(RegistryError, match="loss task must be one of"):
-        register_loss("huber", nn.SmoothL1Loss, task="autoencoding")
-
-
-def test_register_loss_is_importable_from_the_trainer_package() -> None:
-    from trainlattice.trainer import register_loss as package_entry
-
-    assert package_entry is register_loss
+def test_loss_task_rejects_unknown_kinds() -> None:
+    with pytest.raises(ConfigError, match="loss task must be one of"):
+        Task("autoencoding")
 
 
 def test_trainer_rejects_unknown_task_kinds() -> None:
-    from trainlattice.trainer.trainer import Trainer
+    from helpers import Trainer
 
     model = nn.Linear(2, 2)
     with pytest.raises(ValueError, match="task must be one of"):
@@ -86,7 +74,7 @@ def test_trainer_rejects_unknown_task_kinds() -> None:
 
 def test_trainer_aggregates_reductions_as_per_sample_means() -> None:
     from torch.utils.data import DataLoader
-    from trainlattice.trainer.trainer import Trainer
+    from helpers import Trainer
 
     inputs = torch.linspace(-1.0, 1.0, 6).unsqueeze(1)
     loader = DataLoader(TensorDataset(inputs, inputs * 0.5), batch_size=4)
@@ -108,12 +96,6 @@ def test_trainer_aggregates_reductions_as_per_sample_means() -> None:
     assert mean_metrics
     assert {key: value for key, value in run_with("sum").items() if key == "loss"} == pytest.approx(mean_metrics)
     assert {key: value for key, value in run_with("none").items() if key == "loss"} == pytest.approx(mean_metrics)
-
-
-def test_loss_task_points_to_register_loss_for_taskless_registrations() -> None:
-    LOSSES.register("taskless", nn.SmoothL1Loss)
-    with pytest.raises(RegistryError, match="without a task kind; use register_loss"):
-        loss_task("taskless")
 
 
 def build_sine(
@@ -146,6 +128,19 @@ def _sine_contract(options: Mapping[str, Any]) -> ComponentContract:
     return ComponentContract(input_dim=1, num_classes=1, input_shape=(1,))
 
 
+def sine_plugin(tmp_path):
+    import inspect
+    import yaml
+    directory = tmp_path / "sine_plugin"
+    directory.mkdir(exist_ok=True)
+    source = "from __future__ import annotations\nimport math\nimport torch\nfrom torch.utils.data import TensorDataset, Dataset\nfrom typing import Any, Mapping\nfrom trainlattice.contracts.components import ComponentContract, DatasetFactory\nfrom trainlattice.errors import ConfigError\n"
+    source += "\n\n".join(inspect.getsource(item) for item in (build_sine, _validate_sine, _sine_contract))
+    source += '\ndef activate(ctx):\n    ctx.provide("trainlattice.dataset/sine", DatasetFactory("sine", build_sine, _validate_sine, _sine_contract, ctx.require("loaders")))\n'
+    (directory / "plugin.py").write_text(source, encoding="utf-8")
+    (directory / "plugin.yaml").write_text(yaml.safe_dump({"schema_version": 1, "id": "example.sine", "version": "1", "api_version": 1, "entry": "plugin.py:activate", "provides": [{"service": "trainlattice.dataset/sine"}], "requires": {"loaders": {"service": "trainlattice.data/loaders"}}, "state": {"mode": "stateless"}}), encoding="utf-8")
+    return [{"source": str(directory)}]
+
+
 def regression_config(tmp_path: Path, epochs: int = 1) -> ExperimentConfig:
     return ExperimentConfig(
         experiment=ExperimentSection(name="sine", seed=3, runs_dir=str(tmp_path / "runs")),
@@ -158,10 +153,8 @@ def regression_config(tmp_path: Path, epochs: int = 1) -> ExperimentConfig:
 
 
 def test_regression_run_reports_loss_only_and_resumes(tmp_path: Path) -> None:
-    from trainlattice.datasets import DATASETS
-
-    DATASETS.register("sine", build_sine, validate=_validate_sine, contract=_sine_contract)
-    first = run_experiment(regression_config(tmp_path), command="pytest sine")
+    plugins = sine_plugin(tmp_path)
+    first = run_experiment(regression_config(tmp_path), command="pytest sine", plugins=plugins)
 
     assert first.state.status == "finished"
     timing_keys = {"epoch_seconds", "data_seconds", "train_samples_per_sec"}
@@ -172,18 +165,16 @@ def test_regression_run_reports_loss_only_and_resumes(tmp_path: Path) -> None:
     epoch_records = [json.loads(line) for line in metrics_lines if json.loads(line)["phase"] == "epoch"]
     assert all("accuracy" not in record for record in epoch_records)
 
-    resumed = run_experiment(regression_config(tmp_path, epochs=2), command="pytest sine resume", resume=first.run_dir)
+    resumed = run_experiment(regression_config(tmp_path, epochs=2), command="pytest sine resume", resume=first.run_dir, plugins=plugins)
     assert resumed.state.next_epoch == 2
 
 
 def test_regression_run_accepts_sum_and_none_reductions(tmp_path: Path) -> None:
-    from trainlattice.datasets import DATASETS
-
-    DATASETS.register("sine", build_sine, validate=_validate_sine, contract=_sine_contract)
+    plugins = sine_plugin(tmp_path)
     for reduction in ("sum", "none"):
         config = regression_config(tmp_path)
         config.loss = LossConfig("mse", {"reduction": reduction})
-        result = run_experiment(config, command=f"pytest mse {reduction}")
+        result = run_experiment(config, command=f"pytest mse {reduction}", plugins=plugins)
         assert result.state.status == "finished"
         assert math.isfinite(result.state.latest_metrics["val_loss"])
 

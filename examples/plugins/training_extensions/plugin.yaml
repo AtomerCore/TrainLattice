@@ -1,0 +1,21 @@
+schema_version: 1
+id: example.training.extensions
+version: 1.0.0
+api_version: 1
+entry: plugin.py:activate
+provides:
+  - service: example.optimizer/momentum_sgd
+  - service: example.metrics/predictions
+  - service: example.dataset/sine
+  - service: example.model/linear
+  - service: example.scheduler/exponential
+  - service: example.callbacks/counted
+requires:
+  loaders:
+    service: trainlattice.data/loaders
+  metrics:
+    service: trainlattice.metrics/basic
+  callbacks:
+    service: trainlattice.callbacks/basic
+state:
+  mode: stateful
