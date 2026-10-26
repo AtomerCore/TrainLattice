@@ -66,3 +66,41 @@ def validate_scheduler_config(config):
 def build_scheduler(config, optimizer, total_steps=None):
     """Construct a native scheduler with a resolved budget."""
     return get_component("scheduler", config.name).create(config, optimizer, total_steps)
+
+
+def native_mapping(config):
+    """Express a typed domain test fixture through native service bindings."""
+    data = config.to_dict()
+    bindings = {}
+    for category in ("model", "dataset", "optimizer", "loss", "scheduler"):
+        if isinstance(data.get(category), dict):
+            name = data[category].pop("name")
+            bindings[category] = f"trainlattice.{category}/{name}"
+    return {"profile": "supervised-basic", "bindings": {"org.trainlattice.experiment.default": bindings}, **data}
+
+
+def run_experiment(config, *, command="pytest", resume=None, extra_callbacks=()):
+    """Execute typed domain fixtures using the native public Python entry."""
+    from trainlattice.application import run_experiment as execute
+    return execute(native_mapping(config), command=command, resume=resume, callbacks=extra_callbacks)
+
+
+def Trainer(**options):
+    """Assemble a trainer unit fixture with the native metrics collaborator."""
+    from trainlattice.builtin_plugins.trainer_supervised.trainer import Trainer as NativeTrainer
+    with build_application({"profile": "supervised-basic"}) as app:
+        return NativeTrainer(metrics_factory=app.require("trainlattice.metrics/basic"), **options)
+
+
+def CheckpointManager(directory):
+    """Bind a store for training unit tests with an empty plugin graph."""
+    from trainlattice.builtin_plugins.checkpoint_local.store import CheckpointStore
+    from trainlattice.kernel.snapshot import PluginSnapshot
+    return CheckpointStore(directory, snapshot=PluginSnapshot({"schema_version": 1, "contracts_fingerprint": "", "plugins": []}), state_providers={})
+
+
+def load_config(path):
+    """Parse typed domain fixture options independently of bootstrap selection."""
+    import yaml
+    from trainlattice.contracts.config import ExperimentConfig
+    return ExperimentConfig.from_dict(yaml.safe_load(path.read_text(encoding="utf-8")))

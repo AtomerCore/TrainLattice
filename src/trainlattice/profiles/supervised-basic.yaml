@@ -9,3 +9,9 @@ plugins:
   - source: builtin://metrics-basic
   - source: builtin://logging-basic
   - source: builtin://callbacks-basic
+  - source: builtin://trainer-supervised
+  - source: builtin://experiment-default
+  - source: builtin://train-command
+bindings:
+  org.trainlattice.experiment.default:
+    scheduler: null

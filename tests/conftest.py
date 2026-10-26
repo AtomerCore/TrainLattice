@@ -25,6 +25,14 @@ def _reset_cli_logging() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _small_training_workloads():
+    """Keep tiny CPU fixtures on one thread without importing torch for kernel tests."""
+    torch = sys.modules.get("torch")
+    if torch is not None:
+        torch.set_num_threads(1)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_component_registries(request):
     """Restore the shared component registries after tests that extend them."""
     if request.node.path.parent.name == "kernel":

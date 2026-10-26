@@ -11,6 +11,7 @@ from trainlattice.contracts.application import ExecutionRequest
 from trainlattice.kernel.bootstrap import BootstrapConfig, read_yaml
 from trainlattice.kernel.lifecycle import Application, PluginManager
 from trainlattice.kernel.sources import PluginSourceResolver
+from trainlattice.errors import ConfigError
 
 
 def build_application(config: Mapping[str, Any], *, base_dir: Path | None = None) -> Application:
@@ -22,6 +23,8 @@ def build_application(config: Mapping[str, Any], *, base_dir: Path | None = None
 
 def run_experiment(config: Mapping[str, Any], *, base_dir: Path | None = None, command: str = "trainlattice train", resume: str | Path | None = None, callbacks: Sequence[Any] = ()) -> Any:
     """Execute the bound train command and dispose all application resources."""
+    if not isinstance(config, Mapping):
+        raise ConfigError("configuration root must be a mapping")
     raw = deepcopy(dict(config))
     with build_application(raw, base_dir=base_dir) as app:
         request = ExecutionRequest(raw, command, Path(resume) if resume is not None else None, app.snapshot, app.state_providers, tuple(callbacks))

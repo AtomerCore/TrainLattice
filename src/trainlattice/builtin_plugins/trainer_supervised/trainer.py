@@ -14,20 +14,19 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 
-from trainlattice.config.schema import EarlyStoppingConfig
-from trainlattice.trainer.losses import TASKS
-from trainlattice.trainer.metrics import ClassificationTotals, LossTotals
-from trainlattice.trainer.state import TrainerState, utc_now
+from trainlattice.contracts.config import EarlyStoppingConfig
+TASKS = ("classification", "regression")
+from trainlattice.contracts.state import TrainerState, utc_now
 
 if TYPE_CHECKING:
-    from trainlattice.callbacks.base import Callback
+    from trainlattice.contracts.callbacks import Callback
 
 try:
     from torch.amp import GradScaler  # torch >= 2.3 exposes the device-generic scaler
 except ImportError:  # torch 2.1 and 2.2 expose it under torch.cuda.amp only
     from torch.cuda.amp import GradScaler
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("trainlattice.plugins.trainer.supervised")
 
 PRECISION_MODES = ("fp32", "bf16", "fp16")
 MONITORED_METRICS = ("val_loss", "val_accuracy")
@@ -75,6 +74,7 @@ class Trainer:
         loss_fn: nn.Module,
         device: torch.device,
         epochs: int,
+        metrics_factory: Any,
         callbacks: Iterable[Callback] = (),
         validate_every: int = 1,
         max_grad_norm: float | None = None,
@@ -117,7 +117,7 @@ class Trainer:
         self.batch_metrics: dict[str, float] = {}
         self._amp_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16}.get(precision)
         # the task kind decides whether accuracy joins loss in the aggregates
-        self._totals_cls = ClassificationTotals if task == "classification" else LossTotals
+        self._totals_cls = lambda: metrics_factory(task)
         # cooperative stop flag and early-stopping patience live only in this instance
         self._stop_requested = False
         self._stop_reason: str | None = None
@@ -316,7 +316,7 @@ class Trainer:
             "samples_per_sec": self._rate(samples, elapsed),
         }
 
-    def _optimizer_step(self, window: LossTotals | ClassificationTotals, throughput: dict[str, float]) -> None:
+    def _optimizer_step(self, window: Any, throughput: dict[str, float]) -> None:
         """Apply one optimizer update over the gradients accumulated in a window.
 
         Under fp16 the window's losses were backwarded through the shared

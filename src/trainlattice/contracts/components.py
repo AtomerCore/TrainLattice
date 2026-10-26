@@ -53,6 +53,10 @@ class Task:
 
     kind: str
 
+    def __post_init__(self) -> None:
+        if self.kind not in {"classification", "regression"}:
+            raise ConfigError("loss task must be one of: classification, regression")
+
 
 @dataclass(frozen=True, slots=True)
 class LossFactory(ComponentFactory):

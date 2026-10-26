@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import random
+import logging
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -17,6 +18,7 @@ from trainlattice.kernel.snapshot import PluginSnapshot
 from .config import configs_compatible
 
 CHECKPOINT_FORMAT_VERSION = 5
+logger = logging.getLogger("trainlattice.plugins.checkpoint.local")
 
 
 def capture_rng_state() -> dict[str, Any]:
@@ -84,6 +86,7 @@ class CheckpointStore:
         except Exception as exc:
             temporary.unlink(missing_ok=True)
             raise CheckpointError(f"failed to save checkpoint {target}: {exc}") from exc
+        logger.info("checkpoint saved to %s", target)
         return target
 
     def preflight(self, path: str | Path, *, expected_config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -97,7 +100,7 @@ class CheckpointStore:
                 raise CheckpointError("unsupported checkpoint format version; expected 5")
             if payload.get("resume_safe") is not True:
                 raise CheckpointError("checkpoint is a diagnostic emergency snapshot and cannot be resumed safely")
-            required = {"model", "optimizer", "trainer_state", "config", "rng_state", "plugins_snapshot", "plugin_states", "scheduler", "scaler"}
+            required = {"model", "optimizer", "trainer_state", "config", "rng_state", "plugins_snapshot", "plugin_states", "scheduler", "scheduler_budget", "scaler"}
             missing = required - payload.keys()
             if missing:
                 raise CheckpointError(f"checkpoint missing state: {', '.join(sorted(missing))}")
@@ -160,9 +163,11 @@ class CheckpointStore:
             raise CheckpointError(f"failed to restore checkpoint state: {exc}") from exc
 
     def load(self, path: str | Path, *, expected_config: dict[str, Any] | None = None,
-             map_location: Any = "cpu", **objects: Any) -> TrainerState:
+             **objects: Any) -> TrainerState:
         """Preflight and restore directly into existing training objects."""
-        return self.restore(self.preflight(path, expected_config=expected_config), **objects)
+        state = self.restore(self.preflight(path, expected_config=expected_config), **objects)
+        logger.info("checkpoint restored from %s", path)
+        return state
 
 
 class CheckpointFactory:

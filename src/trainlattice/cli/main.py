@@ -72,7 +72,7 @@ def dispatch(args: argparse.Namespace) -> int:
     """Dispatch parsed CLI arguments."""
     if args.command == "plugins":
         return dispatch_plugins(args)
-    from trainlattice.runtime.runner import run_from_file
+    from trainlattice.application import run_from_file
 
     command = " ".join(shlex.quote(item) for item in ["trainlattice", "train", str(args.config)])
     if args.resume:
